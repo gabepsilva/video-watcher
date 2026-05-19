@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# CPU-only install for video-watcher (local Whisper, no API key).
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="${SCRIPT_DIR}/.venv"
+OLD_VENV="${SCRIPT_DIR}/.caption-venv"
+
+log() { printf '%s\n' "$*" >&2; }
+
+migrate_venv() {
+  if [[ -d "$OLD_VENV" && ! -d "$VENV_DIR" ]]; then
+    log "Migrating .caption-venv → .venv ..."
+    mv "$OLD_VENV" "$VENV_DIR"
+  fi
+}
+
+PY="${VENV_DIR}/bin/python"
+pip() { "${PY}" -m pip "$@"; }
+
+venv_ok() {
+  [[ -x "$PY" ]] && "${PY}" -m whisper --help >/dev/null 2>&1
+}
+
+migrate_venv
+
+if venv_ok; then
+  log "Already installed: ${VENV_DIR}"
+  exit 0
+fi
+
+if [[ -d "$VENV_DIR" ]]; then
+  log "Removing broken venv..."
+  rm -rf "${VENV_DIR}"
+fi
+
+log "Creating venv and installing openai-whisper (CPU)..."
+python3 -m venv "${VENV_DIR}"
+pip install -q --upgrade pip
+pip install -q openai-whisper
+
+log "Done. Run: ${SCRIPT_DIR}/video-watcher Downloads/your-video.mp4"
+log "For AMD GPU: ${SCRIPT_DIR}/setup-rocm"

@@ -1,0 +1,6 @@
+.venv/
+.caption-venv/
+.cache/
+.git/
+.gitignore
+Downloads

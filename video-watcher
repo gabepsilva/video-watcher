@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+# video-watcher: generate captions (SRT, VTT, TXT) from video via local Whisper.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="${SCRIPT_DIR}/.venv"
+MODEL="${WHISPER_MODEL:-base}"
+LANGUAGE=""
+OUTPUT_DIR=""
+FORMATS="all"
+USE_GPU=false
+
+usage() {
+  cat <<'EOF'
+Usage: video-watcher [OPTIONS] VIDEO [VIDEO ...]
+
+Transcribe video(s) and write caption files next to each input
+(same basename: .srt, .vtt, .txt, .json, .tsv).
+
+Options:
+  -o, --output-dir DIR   Write all outputs here (default: same dir as video)
+  -m, --model NAME       Whisper model: tiny, base, small, medium, large (default: base)
+  -l, --language CODE    Language code, e.g. en, es (default: auto-detect)
+  -f, --formats LIST     Comma-separated: srt,vtt,txt,json,tsv,all (default: all)
+  --gpu                  Use AMD/NVIDIA GPU (requires ./setup-rocm on AMD)
+  -h, --help             Show this help
+
+Environment:
+  WHISPER_MODEL          Same as --model
+
+Examples:
+  ./video-watcher Downloads/"OpenClaw Intro.mp4"
+  ./video-watcher -m small -l en --gpu Downloads/talk.mp4
+  ./video-watcher -o ./out Downloads/*.mp4
+
+No OpenAI API key required — runs Whisper locally.
+For AMD GPU: run ./setup-rocm once, then use --gpu.
+EOF
+}
+
+log() { printf '%s\n' "$*" >&2; }
+
+migrate_venv() {
+  local old="${SCRIPT_DIR}/.caption-venv"
+  if [[ -d "$old" && ! -d "$VENV_DIR" ]]; then
+    log "Migrating .caption-venv → .venv ..."
+    mv "$old" "$VENV_DIR"
+  fi
+}
+
+gpu_available() {
+  "${VENV_DIR}/bin/python" -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null
+}
+
+ensure_venv() {
+  migrate_venv
+  if ! "${VENV_DIR}/bin/python" -m whisper --help >/dev/null 2>&1; then
+    log "No venv found. Run: ${SCRIPT_DIR}/install-cpu"
+    log "Or for AMD GPU: ${SCRIPT_DIR}/setup-rocm"
+    exit 1
+  fi
+}
+
+parse_args() {
+  if [[ $# -eq 0 ]]; then
+    usage
+    exit 1
+  fi
+
+  local videos=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      -o|--output-dir)
+        OUTPUT_DIR="$2"
+        shift 2
+        ;;
+      -m|--model)
+        MODEL="$2"
+        shift 2
+        ;;
+      -l|--language)
+        LANGUAGE="$2"
+        shift 2
+        ;;
+      -f|--formats)
+        FORMATS="$2"
+        shift 2
+        ;;
+      --gpu)
+        USE_GPU=true
+        shift
+        ;;
+      -*)
+        log "Unknown option: $1"
+        usage
+        exit 1
+        ;;
+      *)
+        videos+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ ${#videos[@]} -eq 0 ]]; then
+    log "Error: provide at least one video file."
+    usage
+    exit 1
+  fi
+
+  for v in "${videos[@]}"; do
+    if [[ ! -f "$v" ]]; then
+      log "Error: not a file: $v"
+      exit 1
+    fi
+  done
+
+  ensure_venv
+
+  if [[ "$USE_GPU" == true ]] && ! gpu_available; then
+    log "Error: --gpu requested but PyTorch sees no GPU."
+    log "On AMD: run ${SCRIPT_DIR}/setup-rocm"
+    exit 1
+  fi
+
+  for v in "${videos[@]}"; do
+    transcribe_one "$v"
+  done
+}
+
+transcribe_one() {
+  local video="$1"
+  local abs_video
+  abs_video="$(cd "$(dirname "$video")" && pwd)/$(basename "$video")"
+  local out_dir
+  if [[ -n "$OUTPUT_DIR" ]]; then
+    out_dir="$(mkdir -p "$OUTPUT_DIR" && cd "$OUTPUT_DIR" && pwd)"
+  else
+    out_dir="$(dirname "$abs_video")"
+  fi
+
+  local base
+  base="$(basename "$abs_video")"
+  base="${base%.*}"
+
+  log ""
+  log "Transcribing: $abs_video"
+  log "Model: $MODEL | Output dir: $out_dir | GPU: $USE_GPU"
+
+  local -a cmd=(
+    "${VENV_DIR}/bin/python" -m whisper
+    "$abs_video"
+    --model "$MODEL"
+    --output_dir "$out_dir"
+    --output_format "$FORMATS"
+  )
+  if [[ -n "$LANGUAGE" ]]; then
+    cmd+=(--language "$LANGUAGE")
+  fi
+  if [[ "$USE_GPU" == true ]]; then
+    cmd+=(--device cuda)
+  fi
+
+  "${cmd[@]}"
+
+  log "Done:"
+  for ext in srt vtt txt json tsv; do
+    local f="${out_dir}/${base}.${ext}"
+    if [[ -f "$f" ]]; then
+      log "  $f"
+    fi
+  done
+}
+
+parse_args "$@"
