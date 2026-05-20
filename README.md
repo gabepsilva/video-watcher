@@ -44,6 +44,7 @@ flowchart LR
 | **video-watcher-docker** | Docker | Check deps, build image, transcribe (auto GPU) |
 | **install-local** | Local | Install CPU Whisper into `.venv` |
 | **install-gpu** | Local | Install AMD ROCm PyTorch + Whisper into `.venv` |
+| **setup-rocm** | Local | Alias for `install-gpu` (back-compat) |
 | **video-watcher** | Local | Transcribe videos (after install) |
 
 ```
@@ -61,9 +62,24 @@ video-watcher/
 ```bash
 ./video-watcher-docker                              # check + build image
 ./video-watcher-docker ~/Downloads/your-video.mp4   # transcribe
-./video-watcher-docker -m small -l en ~/Downloads/talk.mp4
+./video-watcher-docker -m turbo -l en ~/Downloads/talk.mp4
 ./video-watcher-docker --check                      # dependency report only
+./video-watcher-docker --cpu ~/Downloads/foo.mp4     # force CPU image
 ```
+
+Auto-detects **CPU**, **NVIDIA**, or **AMD ROCm** and picks the matching image. Runs entirely in the container and exits on failure (no host fallback). The ROCm image builds **HIP `llama-cli`** so `--gpu --summary` uses the GPU for Whisper and Gemma (rebuild with `--rebuild` after upgrading).
+
+### Microphone in Docker (experimental)
+
+```bash
+./video-watcher-docker --mic -m tiny -l en          # print chunks (Ctrl+C to stop)
+./video-watcher-docker --mic -m tiny -o ~/Downloads # also append to ~/Downloads/mic-*.txt
+./video-watcher-docker --mic -m small -l en         # GPU image used when available
+```
+
+`video-watcher-docker` checks the host for **ALSA** (`/dev/snd`) and **PulseAudio/PipeWire** (`$XDG_RUNTIME_DIR/pulse/native`), passes them into the container, and **rebuilds the image automatically** if `sounddevice` is missing. Images include `libportaudio2` and `sounddevice` (install via the venv’s `python -m pip` on GPU images).
+
+Mic records at the device’s native sample rate (often 48 kHz) and resamples to 16 kHz for Whisper — required for many USB mics in Docker. Same lag tips as native: `tiny`/`base`, shorter `--mic-chunk`. Manual rebuild after upgrading: `./video-watcher-docker --rebuild`.
 
 ## Local (native)
 
@@ -72,11 +88,23 @@ video-watcher/
 ./video-watcher ~/Downloads/your-video.mp4
 ```
 
+### Microphone (experimental)
+
+```bash
+./video-watcher --mic -m tiny -l en          # print chunks to the terminal
+./video-watcher --mic -m tiny -o ./out       # also append to ./out/mic-*.txt
+# Ctrl+C to stop
+```
+
+Uses **sounddevice** (installed by `install-local` / `install-gpu`) and the system **PortAudio** library (`sudo apt install libportaudio2` on Ubuntu). Records at the mic’s native sample rate and resamples to 16 kHz for Whisper. Expect a few seconds of lag per chunk; `tiny` or `base` on `--gpu` feels best.
+
 ### AMD GPU (local)
 
 ```bash
 ./install-gpu
 ./video-watcher --gpu -m small ~/Downloads/your-video.mp4
+# higher quality, still fast on GPU:
+./video-watcher --gpu -m turbo -l en ~/Downloads/your-video.mp4
 ```
 
 Reinstall ROCm stack: `./install-gpu --force`
@@ -92,13 +120,34 @@ export HSA_OVERRIDE_GFX_VERSION=10.3.0
 
 | Flag | Meaning |
 |------|---------|
-| `-m small` | Better accuracy, slower |
-| `-l en` | Force English |
+| `-m MODEL` | Whisper model: `tiny`, `base`, `small`, `medium`, `large`, `turbo` (default: `base`, or `WHISPER_MODEL`) |
+| `-l en` | Force language (default: auto-detect) |
+| `-f srt,vtt,…` | Output formats: `srt`, `vtt`, `txt`, `json`, `tsv`, or `all` (default) |
 | `--gpu` | Use GPU (local: after `install-gpu`; docker: automatic when available) |
 | `--verbose` | Print live transcript text instead of the progress bar |
-| `-o ./out` | Output folder for caption files |
+| `--mic` | Transcribe from the default microphone in chunks (experimental; Ctrl+C to stop) |
+| `--mic-chunk SEC` | Seconds of audio per mic chunk (default: 5; range 1–30). Use `-m tiny` for lower latency |
+| `-o ./out` | Output folder for caption files (with `--mic`, writes `mic-YYYYMMDD-HHMMSS.txt`) |
+| `--list-inputs` | Print supported media extensions and exit |
 | `--summary` | After transcribe: summarize `.txt` with llama.cpp + Mermaid diagrams |
 | `--summary-model` | Summary model key (default: `gemma-4-e4b`; more models later) |
+
+Docker-only: `--cpu` (force CPU image), `--check` (dependency report). `--mic` works in Docker with host audio passthrough (see above). No native fallback for file runs — use `./video-watcher` on the host if you prefer.
+
+### Whisper models
+
+| Model | Size (approx.) | Use when |
+|-------|----------------|----------|
+| `tiny` | 72 MB | Fastest drafts |
+| `base` | 140 MB | Default; quick runs |
+| `small` | 460 MB | Good daily balance with `--gpu` |
+| `medium` | 1.4 GB | Higher accuracy, slower |
+| `large` | 2.9 GB | Best quality (`large-v3`) |
+| `turbo` | 1.5 GB | Near-`large` quality, much faster (`large-v3-turbo`) |
+
+Weights download on first use into `~/.video_watcher/whisper/` with a progress bar. The CLI prints status before audio decode, model load, and download so long first runs are not silent.
+
+Run `video-watcher --help` for environment variables (also listed below).
 
 ## Convenience symlink
 
@@ -141,16 +190,32 @@ After transcription, optionally summarize the `.txt` output with **llama.cpp** (
 
 The GGUF is downloaded once to `~/.video_watcher/llama/` (~5 GB for Gemma 4 E4B Q4). Use `--gpu` so both Whisper and the summarizer can use the GPU. More summary models will be added later (`--summary-model`).
 
+## Environment variables
+
+| Variable | Applies to | Meaning |
+|----------|------------|---------|
+| `WHISPER_MODEL` | local | Default `-m` if omitted (e.g. `small`, `turbo`) |
+| `VIDEO_WATCHER_CACHE` | local, Docker | Model cache root (default: `~/.video_watcher`) |
+| `VIDEO_WATCHER_PYTHON` | launcher | Python binary for `video-watcher` script |
+| `VIDEO_WATCHER_LLAMA_CLI` | local | Path to `llama-cli` for `--summary` |
+| `VIDEO_WATCHER_SUMMARY_MODEL` | local | Default `--summary-model` |
+| `VIDEO_WATCHER_DATA` | Docker | Host folder mounted as `/data` (default: `~/Downloads`) |
+| `CONTAINER_RUNTIME` | Docker | `docker` (default) or `podman` |
+| `HSA_OVERRIDE_GFX_VERSION` | local, Docker | AMD workaround (e.g. `10.3.0` for RX 6000 / Navi 21) |
+
 ## Features
 
 ### Transcription
 
 - **Local Whisper** — no API key or cloud; ffmpeg pipes mono 16 kHz PCM into Whisper (no temp audio file)
+- **`vw` Python package** — `video-watcher` launches `python -m vw`; logic in `vw/` (CLI, transcribe, progress, cache)
 - **Multiple caption formats** — SRT, VTT, TXT, JSON, TSV (`-f` or `all`)
 - **Audio and video inputs** — mp4, mkv, mp3, wav, ogg, flac, and more; `--list-inputs` for the full set
-- **Configurable Whisper models** — `tiny` through `large`, plus `turbo` (large-v3-turbo), and language forcing (`-l en`)
-- **Progress bar** — time-based bar with ETA; `--verbose` for live transcript text instead
+- **Whisper models** — `tiny`, `base`, `small`, `medium`, `large` (`large-v3`), and **`turbo`** (`large-v3-turbo`); language forcing with `-l`
+- **Startup status** — messages before PyTorch loads, audio decode, and model download (first run shows size + progress bar)
+- **Progress bar** — time-based bar with ETA during transcription; `--verbose` for live transcript text instead
 - **Batch-friendly** — transcribe several files in one command
+- **Live microphone** (`--mic`) — chunked live transcription to the terminal; optional `mic-YYYYMMDD-HHMMSS.txt` under `-o` (native and Docker)
 
 ### Summarization (`--summary`)
 
@@ -164,12 +229,33 @@ The GGUF is downloaded once to `~/.video_watcher/llama/` (~5 GB for Gemma 4 E4B 
 
 ### Runtime & deployment
 
-- **Docker or native** — `video-watcher-docker` (check → build → run) or `video-watcher` + `install-local`
-- **GPU auto-detection (Docker)** — CPU, NVIDIA, or AMD ROCm image + device passthrough
+- **Docker or native** — `video-watcher-docker` (check → build → run) or `video-watcher` + `install-local` / `install-gpu`
+- **Three Docker images** — `video-watcher:cpu`, `video-watcher:nvidia`, `video-watcher:rocm` (auto-selected)
+- **GPU auto-detection (Docker)** — CPU, NVIDIA, or AMD ROCm image + device passthrough; `--cpu` to force CPU image
 - **AMD ROCm (local)** — `install-gpu` for RX / Radeon on Linux (`HSA_OVERRIDE_GFX_VERSION` for Navi 21)
 - **Runs as your user (Docker)** — captions and cache owned by you, not root
-- **Model cache** — Whisper under `~/.video_watcher/whisper` (`VIDEO_WATCHER_CACHE` to relocate)
+- **Unified model cache** — `~/.video_watcher/` for Whisper (`whisper/`) and summary GGUF (`llama/`); override with `VIDEO_WATCHER_CACHE`
 - **Dependency checks** — `video-watcher-docker --check`
-- **Native fallback** — Docker failure retries with host `.venv`
+- **Container-only Docker runs** — no host `.venv` fallback; ROCm image includes HIP `llama-cli` for `--summary --gpu`
 - **Podman-compatible** — `CONTAINER_RUNTIME=podman`
-- **Structured Python package** — `vw/` (CLI, transcribe, progress, summary, cache)
+- **Help + env docs** — `video-watcher --help` lists environment variables via `vw/env_docs.py`
+- **Docker mic** — `--mic` with ALSA/Pulse passthrough; auto-rebuild when the image lacks `sounddevice`; CPU image bundles `llama-cli` for `--summary`
+
+## Changelog
+
+### Unreleased (staged + working tree)
+
+- **`--mic` live transcription** — new `vw/mic.py`; CLI flag `--mic` / `--mic-chunk`; works natively and in Docker
+- **Docker mic** — host audio passthrough (`/dev/snd`, Pulse/PipeWire socket), `ensure_mic_image` auto-rebuild, `-o` rewritten to `/data` mount
+- **Mic sample-rate handling** — record at device native rate, resample to 16 kHz (fixes USB mics and Docker ALSA)
+- **Docker images** — `libportaudio2` + `sounddevice` in all images; CPU image adds `llama-cli`, `.venv` on `PATH`; GPU images use `python -m pip` with import check at build
+- **`install-local` / `install-gpu`** — install `sounddevice`; PortAudio hint on Ubuntu
+- **`setup-rocm`** — alias script for `install-gpu`
+- **README** — Whisper model table, env var table, Docker/local mic sections, expanded features list
+- **Docker wrapper** — partial mic wiring in staged changes; full passthrough + auto-rebuild in working tree
+
+### `6e0f2ff` — Add turbo Whisper model and early startup status messages (on `main`)
+
+- **`-m turbo`** — maps to Whisper `large-v3-turbo` (near-`large` quality, faster)
+- **Startup status** — stderr messages before PyTorch loads, audio decode, and model download (with progress bar on first download)
+- **Model cache** — download progress via `vw/cache.py`; transcribe status in `vw/transcribe.py`

@@ -117,7 +117,7 @@ log "Installing triton (whisper dependency)..."
 pip install -q "triton>=2"
 
 log "Installing openai-whisper..."
-pip install -q openai-whisper
+pip install -q openai-whisper sounddevice
 
 log "Verifying GPU..."
 if ! "${PY}" -c "

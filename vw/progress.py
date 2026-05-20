@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import importlib
 from typing import Iterator
 from unittest.mock import patch
 
@@ -82,9 +83,9 @@ def _tqdm_factory(label: str):
 def nice_progress(label: str) -> Iterator[None]:
     """Patch Whisper's tqdm usage for human-friendly bars."""
     factory = _tqdm_factory(label)
-    with contextlib.ExitStack() as stack:
-        stack.enter_context(patch("whisper.transcribe.tqdm.tqdm", factory))
-        stack.enter_context(patch("whisper.tqdm", factory))
+    # whisper.transcribe is the function; the module is still whisper.transcribe on disk.
+    transcribe_mod = importlib.import_module("whisper.transcribe")
+    with patch.object(transcribe_mod.tqdm, "tqdm", factory):
         yield
 
 
@@ -92,7 +93,8 @@ def nice_progress(label: str) -> Iterator[None]:
 def whisper_model_load_progress(model_name: str) -> Iterator[None]:
     """Patch tqdm during whisper.load_model (download + load weights)."""
     factory = _tqdm_factory(model_name)
-    with patch("whisper.__init__.tqdm", factory):
+    # patch("whisper.__init__.tqdm") incorrectly targets the module __init__ method.
+    with patch("whisper.tqdm", factory):
         yield
 
 

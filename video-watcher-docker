@@ -48,9 +48,13 @@ Examples:
   ./video-watcher-docker
   ./video-watcher-docker ~/Downloads/talk.mp4
   ./video-watcher-docker -m small -l en ~/Downloads/*.mp4
+  ./video-watcher-docker --mic -m tiny -l en
+  ./video-watcher-docker --mic -m tiny -o ~/Downloads
   ./video-watcher-docker --check
 
-Local path: ./install-local  then  ./video-watcher FILE
+Local path (no Docker): ./install-local  then  ./video-watcher FILE
+
+Docker runs entirely inside the container and exits on failure (no host fallback).
 
 Transcription flags (passed through to video-watcher / vw):
   -o, --output-dir DIR   Output directory for caption files
@@ -59,6 +63,10 @@ Transcription flags (passed through to video-watcher / vw):
   -f, --formats LIST     srt,vtt,txt,json,tsv,all
   --gpu                  Use GPU inside the container (when image supports it)
   --verbose              Live transcript text instead of progress bar
+  --summary              After transcribe, summarize .txt (llama-cli built into the image)
+  --summary-model KEY    Summary model (default: gemma-4-e4b)
+  --mic                  Microphone mode (passthrough host ALSA/Pulse; Ctrl+C to stop)
+  --mic-chunk SEC        Seconds per mic chunk (default: 5)
 
 Environment variables:
   VIDEO_WATCHER_CACHE    Host cache dir → /cache (default: ~/.video_watcher)
@@ -327,22 +335,11 @@ build_image() {
   ok "Built $image"
 }
 
-run_native() {
-  log ""
-  log "Running natively (host .venv)…"
-  if [[ ! -x "${SCRIPT_DIR}/.venv/bin/python" ]]; then
-    log "Installing native CPU env…"
-    "${SCRIPT_DIR}/install-local"
-  fi
-  local -a cmd=("${SCRIPT_DIR}/video-watcher")
-  if [[ "$GPU_KIND" != "none" ]]; then
-    cmd+=(--gpu)
-  fi
-  cmd+=("${WHISPER_ARGS[@]}" "${VIDEOS[@]}")
-  "${cmd[@]}"
-}
-
 resolve_mount_dir() {
+  if wants_mic; then
+    mic_mount_dir
+    return
+  fi
   local v dir first=""
   for v in "${VIDEOS[@]}"; do
     dir="$(cd "$(dirname "$v")" && pwd)"
@@ -369,9 +366,157 @@ host_to_container_paths() {
   done
 }
 
+wants_summary() {
+  local arg
+  for arg in "${WHISPER_ARGS[@]}"; do
+    [[ "$arg" == --summary ]] && return 0
+  done
+  return 1
+}
+
+wants_mic() {
+  local arg
+  for arg in "${WHISPER_ARGS[@]}"; do
+    [[ "$arg" == --mic ]] && return 0
+  done
+  return 1
+}
+
+mic_mount_dir() {
+  local i=0 arg dir
+  while (( i < ${#WHISPER_ARGS[@]} )); do
+    arg="${WHISPER_ARGS[$i]}"
+    if [[ "$arg" == -o || "$arg" == --output-dir ]]; then
+      dir="${WHISPER_ARGS[$((i + 1))]}"
+      dir="${dir/#\~/$HOME}"
+      mkdir -p "$dir"
+      cd "$dir" && pwd
+      return
+    fi
+    ((i++)) || true
+  done
+  mkdir -p "$DATA_DIR"
+  cd "$DATA_DIR" && pwd
+}
+
+# Rewrite -o to /data so paths match the container mount.
+container_whisper_args() {
+  local -n _out=$1
+  _out=()
+  local i=0 arg
+  while (( i < ${#WHISPER_ARGS[@]} )); do
+    arg="${WHISPER_ARGS[$i]}"
+    if [[ "$arg" == -o || "$arg" == --output-dir ]]; then
+      _out+=("$arg" "/data")
+      ((i += 2)) || true
+      continue
+    fi
+    _out+=("$arg")
+    ((i++)) || true
+  done
+}
+
+check_mic_host() {
+  log ""
+  log "Microphone (Docker)"
+  local uid runtime pulse_sock
+  uid="$(id -u)"
+  runtime="${XDG_RUNTIME_DIR:-/run/user/${uid}}"
+  pulse_sock="${runtime}/pulse/native"
+
+  if [[ -d /dev/snd ]]; then
+    ok "ALSA /dev/snd"
+  else
+    warn "No /dev/snd — relying on PulseAudio/PipeWire socket"
+  fi
+
+  if [[ -S "$pulse_sock" ]]; then
+    ok "PulseAudio/PipeWire socket (${pulse_sock})"
+    return 0
+  fi
+
+  if [[ -d /dev/snd ]]; then
+    warn "No Pulse socket at ${pulse_sock} (PortAudio may use ALSA)"
+    return 0
+  fi
+
+  fail "No microphone path found (/dev/snd or Pulse socket)"
+  add_missing "Start PipeWire/PulseAudio, or ensure ALSA devices exist under /dev/snd"
+  return 1
+}
+
+append_mic_audio_args() {
+  local -n _run=$1
+  local uid runtime pulse_sock
+  uid="$(id -u)"
+  runtime="${XDG_RUNTIME_DIR:-/run/user/${uid}}"
+  pulse_sock="${runtime}/pulse/native"
+
+  if [[ -d /dev/snd ]]; then
+    _run+=(--device=/dev/snd)
+    if getent group audio >/dev/null 2>&1; then
+      _run+=(--group-add "$(getent group audio | cut -d: -f3)")
+    fi
+  fi
+  if [[ -S "$pulse_sock" ]]; then
+    _run+=(
+      -v "${runtime}:${runtime}"
+      -e "XDG_RUNTIME_DIR=${runtime}"
+      -e "PULSE_SERVER=unix:${pulse_sock}"
+    )
+  fi
+}
+
+mic_image_ok() {
+  local image
+  image="$(image_for_gpu)"
+  "$CTR" run --rm --entrypoint python "$image" -c "import sounddevice" >/dev/null 2>&1
+}
+
+ensure_mic_image() {
+  if mic_image_ok; then
+    return 0
+  fi
+  log ""
+  log "Image missing sounddevice for --mic — rebuilding $(image_for_gpu)…"
+  REBUILD=true
+  build_image
+  if mic_image_ok; then
+    ok "sounddevice installed in $(image_for_gpu)"
+    return 0
+  fi
+  log ""
+  fail "Rebuild finished but sounddevice is still missing"
+  add_missing "Check Docker build output, then: ./video-watcher-docker --rebuild"
+  return 1
+}
+
+check_summary_in_image() {
+  local image
+  image="$(image_for_gpu)"
+  log ""
+  log "Summary (--summary)"
+  if "$CTR" run --rm --entrypoint test "$image" -x /opt/llama/llama-cli >/dev/null 2>&1; then
+    ok "llama-cli in image: /opt/llama/llama-cli"
+    if [[ "$GPU_KIND" == amd ]] \
+      && ! "$CTR" run --rm --entrypoint ldd "$image" /opt/llama/llama-cli 2>/dev/null | grep -q ggml-hip; then
+      fail "ROCm image has CPU-only llama-cli (Gemma will not use GPU)"
+      add_missing "Rebuild: ./video-watcher-docker --rebuild"
+      return 1
+    fi
+    if [[ "$GPU_KIND" == amd ]]; then
+      ok "llama-cli HIP backend (Gemma can use ROCm with --gpu)"
+    fi
+    return 0
+  fi
+  fail "llama-cli missing in $image"
+  add_missing "Rebuild the image: ./video-watcher-docker --rebuild"
+  return 1
+}
+
 docker_run() {
   local image gpu_flag=() mount_dir cache_dir
-  local -a user_args=()
+  local -a user_args=() whisper_args=() container_videos=()
   image="$(image_for_gpu)"
   if [[ "$GPU_KIND" != none ]]; then
     gpu_flag=(--gpu)
@@ -381,8 +526,20 @@ docker_run() {
   cache_dir="$(cache_dir)"
   container_user_args user_args
 
+  if wants_mic; then
+    container_whisper_args whisper_args
+  else
+    whisper_args=("${WHISPER_ARGS[@]}")
+    host_to_container_paths container_videos "$mount_dir"
+  fi
+
   local -a run_args=(run --rm)
-  if [[ -t 1 ]]; then
+  if wants_mic; then
+    # -it only when stdin+stdout are TTYs (docker errors on -i without a terminal)
+    if [[ -t 0 && -t 1 ]]; then
+      run_args+=(-it)
+    fi
+  elif [[ -t 1 ]]; then
     run_args+=(-t)
   fi
   run_args+=(
@@ -390,10 +547,15 @@ docker_run() {
     -e "HOME=/tmp"
     -e "USER=${HOST_USER}"
     -e "PYTHONUNBUFFERED=1"
+    -e "VIDEO_WATCHER_CACHE=/cache"
     -e "TERM=${TERM:-xterm-256color}"
     -v "${mount_dir}:/data"
     -v "${cache_dir}:/cache"
   )
+
+  if wants_mic; then
+    append_mic_audio_args run_args
+  fi
 
   case "$GPU_KIND" in
     nvidia)
@@ -417,13 +579,13 @@ docker_run() {
       ;;
   esac
 
-  local -a container_videos=()
-  host_to_container_paths container_videos "$mount_dir"
-
   log ""
   log "Running $image as ${HOST_USER} (${HOST_UID}:${HOST_GID}) | GPU: $GPU_KIND"
   log "  mount: ${mount_dir} → /data | cache: ${cache_dir} → /cache"
-  "$CTR" "${run_args[@]}" "$image" "${gpu_flag[@]}" "${WHISPER_ARGS[@]}" "${container_videos[@]}"
+  if wants_mic; then
+    log "  mic: host ALSA/Pulse → container (Ctrl+C to stop)"
+  fi
+  "$CTR" "${run_args[@]}" "$image" "${gpu_flag[@]}" "${whisper_args[@]}" "${container_videos[@]}"
 }
 
 parse_args() {
@@ -453,16 +615,12 @@ parse_args() {
         DATA_DIR="$2"
         shift 2
         ;;
-      -o|--output-dir|-m|--model|-l|--language|-f|--formats)
+      -o|--output-dir|-m|--model|-l|--language|-f|--formats|--summary-model|--mic-chunk)
         WHISPER_ARGS+=("$1" "$2")
         shift 2
         ;;
-      --gpu)
-        WHISPER_ARGS+=(--gpu)
-        shift
-        ;;
-      --verbose)
-        WHISPER_ARGS+=(--verbose)
+      --gpu|--verbose|--summary|--mic)
+        WHISPER_ARGS+=("$1")
         shift
         ;;
       -*)
@@ -485,6 +643,8 @@ parse_args() {
         exit 1
       fi
     done
+  elif wants_mic; then
+    MODE="run"
   fi
 }
 
@@ -501,21 +661,45 @@ main() {
     exit 1
   fi
 
+  if wants_mic && ! check_mic_host; then
+    log ""
+    log "Fix microphone access above, then run ./video-watcher-docker --mic again."
+    exit 1
+  fi
+
   [[ "$MODE" == check ]] && exit 0
 
   build_image
 
+  if [[ "$MODE" == run ]] && wants_mic && ! ensure_mic_image; then
+    log ""
+    log "Fix the image build above, then run ./video-watcher-docker --mic again."
+    exit 1
+  fi
+
+  if [[ "$MODE" == run ]] && wants_summary && ! check_summary_in_image; then
+    log ""
+    log "Fix summary dependencies, then run ./video-watcher-docker again."
+    exit 1
+  fi
+
   if [[ "$MODE" == "run" ]]; then
-    if docker_run; then
-      exit 0
+    local docker_ec=0
+    docker_run || docker_ec=$?
+    if [[ "$docker_ec" -ne 0 ]]; then
+      log ""
+      fail "Container run failed (exit ${docker_ec}). Nothing was run on the host."
+      log "For a native run (no Docker), use: ${SCRIPT_DIR}/video-watcher …"
+      exit "$docker_ec"
     fi
-    warn "Docker run failed — trying native install"
-    run_native
-    exit $?
+    exit 0
   else
     log ""
     log "Ready. Transcribe a video:"
     log "  ./video-watcher-docker ${DATA_DIR}/your-video.mp4"
+    log "Live mic (rebuild once after upgrade: --rebuild):"
+    log "  ./video-watcher-docker --mic -m tiny -l en"
+    log "  ./video-watcher-docker --mic -m tiny -o ${DATA_DIR}"
     log ""
     log "Image: $(image_for_gpu)  |  Data dir: ${DATA_DIR}  |  GPU: ${GPU_KIND}"
   fi

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Back-compat alias for install-gpu (older docs/images used this name).
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+printf '%s\n' "note: setup-rocm → install-gpu" >&2
+exec "${SCRIPT_DIR}/install-gpu" "$@"

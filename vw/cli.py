@@ -66,6 +66,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="print transcribed text live instead of a progress bar",
     )
     parser.add_argument(
+        "--mic",
+        action="store_true",
+        help="transcribe from the default microphone in chunks (experimental; Ctrl+C to stop)",
+    )
+    parser.add_argument(
+        "--mic-chunk",
+        type=float,
+        default=5.0,
+        metavar="SEC",
+        help="seconds of audio per mic chunk (default: 5; use 1–30)",
+    )
+    parser.add_argument(
         "--list-inputs",
         action="store_true",
         help="print accepted input file types and exit",
@@ -107,9 +119,55 @@ def main(argv: list[str] | None = None) -> int:
         print(format_media_list())
         return 0
 
+    if args.mic:
+        if args.summary:
+            print("error: --summary is not supported with --mic", file=sys.stderr)
+            return 1
+        if args.media:
+            print(
+                "warning: ignoring media file(s) with --mic",
+                file=sys.stderr,
+            )
+        if args.verbose:
+            print(
+                "warning: --verbose has no effect with --mic (text is always printed)",
+                file=sys.stderr,
+            )
+
+        _status("Loading PyTorch and Whisper …")
+        from vw.mic import default_mic_output_path, listen_microphone
+        from vw.transcribe import resolve_device
+
+        device = resolve_device(args.gpu)
+        _status(f"Device: {device}  |  Model: {args.model}")
+
+        out_path: Path | None = None
+        if args.output_dir:
+            out_dir = Path(args.output_dir).expanduser().resolve()
+            out_path = default_mic_output_path(out_dir)
+
+        try:
+            listen_microphone(
+                model_name=args.model,
+                device=device,
+                language=args.language,
+                chunk_seconds=args.mic_chunk,
+                output_path=out_path,
+            )
+        except (ValueError, ImportError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        except Exception as exc:
+            print(f"error: microphone: {exc}", file=sys.stderr)
+            return 1
+
+        if out_path is not None and out_path.is_file():
+            print(f"Transcript: {out_path}", file=sys.stderr)
+        return 0
+
     if not args.media:
         parser.print_help()
-        print("\nerror: provide at least one media file.", file=sys.stderr)
+        print("\nerror: provide at least one media file, or use --mic.", file=sys.stderr)
         return 1
 
     paths = [Path(p).expanduser() for p in args.media]
@@ -156,6 +214,7 @@ def main(argv: list[str] | None = None) -> int:
                 language=args.language,
                 device=device,
                 verbose=args.verbose,
+                release_gpu=args.summary and device == "cuda",
             )
         except Exception as exc:
             print(f"error: {abs_path}: {exc}", file=sys.stderr)

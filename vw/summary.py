@@ -237,7 +237,8 @@ def _llama_complete(
     if use_gpu:
         cmd.extend(["-ngl", "999"])
 
-    print(f"{label} with {model_key} ({llama_cli.name}) …", file=sys.stderr)
+    gpu_note = " GPU" if use_gpu else ""
+    print(f"{label} with {model_key} ({llama_cli.name}{gpu_note}) …", file=sys.stderr)
 
     with tempfile.NamedTemporaryFile(
         mode="w",

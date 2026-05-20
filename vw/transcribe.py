@@ -56,6 +56,36 @@ def resolve_device(use_gpu: bool) -> str:
     return "cpu"
 
 
+def release_whisper_gpu(model=None) -> None:
+    """Free Whisper weights on GPU before another GPU consumer (e.g. llama-cli)."""
+    import gc
+
+    if model is not None:
+        del model
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def load_whisper_model(model_name: str, device: str):
+    """Load Whisper model (downloads on first use)."""
+    setup_cache()
+    _announce_whisper_model(model_name)
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
+        if device == "cpu":
+            warnings.filterwarnings(
+                "ignore", message="Performing inference on CPU when CUDA is available"
+            )
+        with whisper_model_load_progress(model_name):
+            return whisper.load_model(
+                model_name,
+                device=device,
+                download_root=str(whisper_model_dir()),
+            )
+
+
 def audio_duration_seconds(path: Path) -> float:
     audio = load_audio(str(path))
     return len(audio) / 16000.0
@@ -70,6 +100,7 @@ def transcribe_file(
     language: str | None,
     device: str,
     verbose: bool,
+    release_gpu: bool = False,
 ) -> dict:
     _status(f"Decoding audio ({path.name}) …")
     setup_cache()
@@ -78,20 +109,7 @@ def transcribe_file(
     if not verbose:
         print_file_header(path, model_name, device, duration)
 
-    _announce_whisper_model(model_name)
-
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
-        if device == "cpu":
-            warnings.filterwarnings(
-                "ignore", message="Performing inference on CPU when CUDA is available"
-            )
-        with whisper_model_load_progress(model_name):
-            model = whisper.load_model(
-                model_name,
-                device=device,
-                download_root=str(whisper_model_dir()),
-            )
+    model = load_whisper_model(model_name, device)
 
     transcribe_kwargs: dict = {
         "temperature": 0,
@@ -110,6 +128,10 @@ def transcribe_file(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         writer(result, str(path))
+
+    if release_gpu:
+        _status("Releasing Whisper from GPU …")
+        release_whisper_gpu(model)
 
     return result
 
