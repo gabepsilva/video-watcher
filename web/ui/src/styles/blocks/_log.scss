@@ -1,0 +1,38 @@
+// Live log panel
+
+.log-view {
+  background: var(--surface-2);
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 12px 0;
+  max-height: 220px;
+  overflow-y: auto;
+  font-feature-settings: "tnum";
+  margin: 0;
+
+  &__line {
+    display: grid;
+    grid-template-columns: 78px 1fr;
+    padding: 1px 18px;
+    gap: 12px;
+    color: var(--ink-2);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  &__ts {
+    color: var(--dim-2);
+  }
+
+  &--plain {
+    padding: 0.75rem 18px;
+    white-space: pre-wrap;
+  }
+}
+
+.alert {
+  font-size: 13px;
+  color: var(--red);
+  margin: 0;
+}

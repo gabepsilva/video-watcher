@@ -1,0 +1,69 @@
+// Page scaffolding inside main area
+
+.page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 32px 40px 80px;
+
+  [data-density="compact"] & {
+    padding: 22px 28px 60px;
+  }
+
+  &__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 24px;
+    margin-bottom: 22px;
+  }
+
+  &__title {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.018em;
+    margin: 0 0 4px;
+  }
+
+  &__sub {
+    color: var(--dim);
+    font-size: 13px;
+    margin: 0;
+    max-width: 56ch;
+  }
+
+  &__actions {
+    display: flex;
+    gap: 8px;
+  }
+}
+
+.mode-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  width: fit-content;
+  margin-bottom: 18px;
+}
+
+.mode-tab {
+  background: transparent;
+  border: 0;
+  padding: 7px 14px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--dim);
+  font-size: 13px;
+  font-weight: 500;
+
+  &--on {
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: var(--shadow-1);
+  }
+}

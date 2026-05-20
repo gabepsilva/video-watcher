@@ -1,0 +1,27 @@
+// Layout helpers (not BEM blocks — utility layer)
+
+.u-flex {
+  display: flex;
+  align-items: center;
+}
+
+.u-gap-2 {
+  gap: 8px;
+}
+
+.u-gap-3 {
+  gap: 12px;
+}
+
+.u-muted {
+  color: var(--dim);
+}
+
+.u-mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+}
+
+.u-spacer {
+  flex: 1;
+}

@@ -1,0 +1,112 @@
+// Sidebar navigation
+
+.sidebar {
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  padding: 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+
+  &__foot {
+    margin-top: auto;
+    padding: 10px;
+    border-top: 1px solid var(--line);
+    font-size: 11px;
+    color: var(--dim);
+    font-family: var(--font-mono);
+    line-height: 1.5;
+  }
+
+  &__foot-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+}
+
+.nav {
+  &__label {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--dim-2);
+    padding: 14px 10px 6px;
+    font-weight: 600;
+  }
+
+  &__item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: var(--radius);
+    color: var(--ink-2);
+    cursor: pointer;
+    font-size: 13px;
+    border: 0;
+    background: transparent;
+    width: 100%;
+    text-align: left;
+    position: relative;
+    user-select: none;
+
+    &:hover {
+      background: var(--surface-2);
+    }
+
+    &--active {
+      background: var(--surface-2);
+      color: var(--ink);
+      font-weight: 500;
+
+      &::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 6px;
+        bottom: 6px;
+        width: 2px;
+        border-radius: 2px;
+        background: var(--ink);
+      }
+    }
+  }
+
+  &__icon {
+    color: var(--dim);
+    flex: none;
+
+    .nav__item--active & {
+      color: var(--ink);
+    }
+  }
+
+  &__count {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--dim);
+    font-feature-settings: "tnum";
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+
+    &--live {
+      color: var(--teal);
+    }
+  }
+
+  &__kbd {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    background: var(--kbd-bg);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: var(--dim);
+    font-feature-settings: "tnum";
+  }
+}

@@ -20,13 +20,16 @@ export type ApiMeta = {
   repo_root?: string;
 };
 
-export type JobDetail = {
+export type JobSummary = {
   id: string;
   kind: string;
   state: string;
   created_at: string;
   exit_code: number | null;
   error: string | null;
+};
+
+export type JobDetail = JobSummary & {
   artifacts: { name: string; url: string }[];
   log_tail: string[];
 };
@@ -46,6 +49,14 @@ export async function createJob(form: FormData): Promise<{ job_id: string }> {
     throw new Error(`POST /api/jobs failed: ${r.status} ${t}`);
   }
   return r.json() as Promise<{ job_id: string }>;
+}
+
+export async function listJobs(): Promise<JobSummary[]> {
+  const r = await fetch("/api/jobs");
+  if (!r.ok) {
+    throw new Error(`GET /api/jobs failed: ${r.status}`);
+  }
+  return r.json() as Promise<JobSummary[]>;
 }
 
 export async function getJob(id: string): Promise<JobDetail> {

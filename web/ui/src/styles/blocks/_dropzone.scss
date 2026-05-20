@@ -1,0 +1,86 @@
+// File upload dropzone
+
+.dropzone {
+  border: 1.5px dashed var(--line-2);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+  text-align: center;
+  cursor: pointer;
+  background: var(--surface);
+  transition: border-color 0.15s, background 0.15s;
+
+  &:hover {
+    border-color: var(--ink-2);
+    background: var(--surface-2);
+  }
+
+  &--drag {
+    border-color: var(--ink);
+    background: var(--surface-2);
+  }
+
+  &__title {
+    font-weight: 500;
+    font-size: 13.5px;
+    margin-top: 8px;
+  }
+
+  &__sub {
+    font-size: 12px;
+    color: var(--dim);
+    margin-top: 4px;
+  }
+
+  &__browse {
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  &--has-file {
+    border-style: solid;
+    border-color: var(--line);
+    text-align: left;
+    padding: 14px 16px;
+    cursor: default;
+
+    &:hover {
+      background: var(--surface);
+    }
+  }
+}
+
+.file-pill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  &__thumb {
+    width: 42px;
+    height: 42px;
+    border-radius: 6px;
+    background: var(--surface-2);
+    display: grid;
+    place-items: center;
+    color: var(--dim);
+    flex: none;
+  }
+
+  &__meta {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__name {
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__stats {
+    font-size: 12px;
+    color: var(--dim);
+    font-family: var(--font-mono);
+  }
+}

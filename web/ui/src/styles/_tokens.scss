@@ -1,0 +1,66 @@
+// Design tokens — light paper console (matches standalone mock)
+
+:root {
+  --bg: #f6f4ef;
+  --surface: #fbfaf6;
+  --surface-2: #f1efe9;
+  --ink: #16171a;
+  --ink-2: #2a2c30;
+  --dim: #6c6c72;
+  --dim-2: #95949a;
+  --line: #e3dfd6;
+  --line-2: #d4cfc3;
+  --kbd-bg: #ecebe5;
+
+  --teal: oklch(0.66 0.085 195);
+  --teal-bg: oklch(0.93 0.03 195);
+  --amber: oklch(0.74 0.12 75);
+  --amber-bg: oklch(0.94 0.04 80);
+  --red: oklch(0.62 0.16 25);
+  --red-bg: oklch(0.94 0.04 25);
+  --green: oklch(0.62 0.1 150);
+  --green-bg: oklch(0.93 0.035 150);
+
+  --radius: 6px;
+  --radius-lg: 10px;
+  --shadow-1: 0 1px 0 rgba(20, 18, 12, 0.04);
+  --shadow-2: 0 8px 28px -12px rgba(20, 18, 12, 0.18);
+
+  --pad: 16px;
+  --pad-lg: 24px;
+  --pad-sm: 10px;
+
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+[data-theme="dark"] {
+  --bg: #0d0e10;
+  --surface: #131418;
+  --surface-2: #1a1c20;
+  --ink: #ecebe7;
+  --ink-2: #c8c6c0;
+  --dim: #8a8a90;
+  --dim-2: #5e5e64;
+  --line: #24262a;
+  --line-2: #2f3136;
+  --kbd-bg: #1f2125;
+
+  --teal: oklch(0.72 0.1 195);
+  --teal-bg: oklch(0.32 0.05 195);
+  --amber: oklch(0.78 0.13 75);
+  --amber-bg: oklch(0.3 0.05 75);
+  --red: oklch(0.7 0.17 25);
+  --red-bg: oklch(0.32 0.07 25);
+  --green: oklch(0.72 0.12 150);
+  --green-bg: oklch(0.3 0.05 150);
+
+  --shadow-1: 0 1px 0 rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 12px 32px -10px rgba(0, 0, 0, 0.6);
+}
+
+[data-density="compact"] {
+  --pad: 12px;
+  --pad-lg: 18px;
+  --pad-sm: 8px;
+}
