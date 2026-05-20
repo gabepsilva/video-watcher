@@ -7,11 +7,12 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY install-cpu video-watcher ./
-RUN chmod +x install-cpu video-watcher \
-    && ./install-cpu
+COPY install-local video-watcher ./
+RUN chmod +x install-local video-watcher \
+    && ./install-local \
+    && chmod -R a+rX /app
 
-# Persist downloaded Whisper weights between runs (optional volume).
+# Persist downloaded Whisper weights (bind-mount ~/.cache/video-watcher → /cache).
 ENV XDG_CACHE_HOME=/cache
 
 ENTRYPOINT ["./video-watcher"]

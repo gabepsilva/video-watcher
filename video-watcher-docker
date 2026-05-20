@@ -1,0 +1,500 @@
+#!/usr/bin/env bash
+# Docker path: check dependencies, build image, run transcription (GPU when available).
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+IMAGE_CPU="video-watcher:cpu"
+IMAGE_NVIDIA="video-watcher:nvidia"
+IMAGE_ROCM="video-watcher:rocm"
+DATA_DIR="${VIDEO_WATCHER_DATA:-$HOME/Downloads}"
+HOST_UID="$(id -u)"
+HOST_GID="$(id -g)"
+HOST_USER="$(id -un)"
+CTR=""
+
+GPU_KIND="none" # none | nvidia | amd
+MISSING=()
+WARNINGS=()
+MODE="prepare" # prepare | check | run
+REBUILD=false
+FORCE_CPU=false
+WHISPER_ARGS=()
+VIDEOS=()
+
+log() { printf '%s\n' "$*" >&2; }
+ok() { log "  ✓ $*"; }
+warn() { log "  ! $*"; }
+fail() { log "  ✗ $*"; }
+
+usage() {
+  cat <<'EOF'
+Usage: ./video-watcher-docker [OPTIONS] [VIDEO ...]
+
+Docker path for video-watcher. Checks dependencies, builds the right image
+(CPU / NVIDIA / AMD), and runs transcription with GPU when possible.
+
+With no media files: check dependencies and build the image.
+With media files (mp4, mkv, mp3, wav, ogg, …): run transcription (auto-adds --gpu when a GPU image is used).
+
+Options:
+  --check       Only check dependencies (do not build or run)
+  --rebuild     Force rebuild of the Docker image
+  --cpu         Force CPU image even if a GPU is detected
+  --data-dir D  Host folder mounted as /data (default: ~/Downloads)
+  --list-inputs Print accepted input file types (same as video-watcher)
+  -h, --help    Show this help
+
+Examples:
+  ./video-watcher-docker
+  ./video-watcher-docker ~/Downloads/talk.mp4
+  ./video-watcher-docker -m small -l en ~/Downloads/*.mp4
+  ./video-watcher-docker --check
+
+Local path: ./install-local  then  ./video-watcher FILE
+
+Containers run as your host user (UID:GID) so caption files are owned by you, not root.
+Cache: ~/.cache/video-watcher (override with VIDEO_WATCHER_CACHE).
+EOF
+}
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+container_runtime() {
+  if [[ -n "${CONTAINER_RUNTIME:-}" ]]; then
+    printf '%s' "$CONTAINER_RUNTIME"
+    return 0
+  fi
+  if have docker && docker info >/dev/null 2>&1; then
+    printf '%s' docker
+  elif have podman && podman info >/dev/null 2>&1; then
+    printf '%s' podman
+  elif have docker; then
+    printf '%s' docker
+  else
+    printf '%s' podman
+  fi
+}
+
+cache_dir() {
+  local dir="${VIDEO_WATCHER_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/video-watcher}"
+  mkdir -p "$dir"
+  printf '%s' "$(cd "$dir" && pwd)"
+}
+
+# Sets array name passed as first arg: container user mapping for file ownership.
+container_user_args() {
+  local -n _out=$1
+  _out=()
+  if [[ "$CTR" == podman ]]; then
+    _out=(--userns=keep-id)
+  else
+    _out=(--user "${HOST_UID}:${HOST_GID}")
+  fi
+}
+
+pkg_hint() {
+  local pkg="$1"
+  if have apt-get; then
+    printf 'sudo apt-get install -y %s' "$pkg"
+  elif have dnf; then
+    printf 'sudo dnf install -y %s' "$pkg"
+  elif have pacman; then
+    printf 'sudo pacman -S --needed %s' "$pkg"
+  else
+    printf '# install %s using your package manager' "$pkg"
+  fi
+}
+
+add_missing() { MISSING+=("$1"); }
+add_warning() { WARNINGS+=("$1"); }
+
+check_docker() {
+  log ""
+  log "Docker"
+  if ! have docker; then
+    fail "docker not found"
+    add_missing "docker — $(pkg_hint docker.io || pkg_hint docker)"
+    return 1
+  fi
+  ok "docker CLI"
+
+  CTR="$(container_runtime)"
+  if ! "$CTR" info >/dev/null 2>&1; then
+    fail "Container engine not running (or no permission): $CTR"
+    add_missing "Start Docker: sudo systemctl start docker"
+    add_missing "Or add your user to the docker group: sudo usermod -aG docker \$USER (then log out/in)"
+    return 1
+  fi
+  ok "Container engine ($CTR)"
+
+  if [[ "$CTR" == docker ]] && "$CTR" buildx version >/dev/null 2>&1; then
+    ok "docker buildx"
+  elif [[ "$CTR" == docker ]]; then
+    warn "docker buildx not found (using plain docker build)"
+  fi
+  ok "Run as host user ${HOST_USER} (${HOST_UID}:${HOST_GID})"
+  return 0
+}
+
+check_nvidia_host() {
+  have nvidia-smi && nvidia-smi >/dev/null 2>&1
+}
+
+check_nvidia_docker() {
+  "$CTR" run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi >/dev/null 2>&1
+}
+
+check_amd_host() {
+  [[ -e /dev/kfd && -e /dev/dri ]]
+}
+
+check_nvidia() {
+  log ""
+  log "NVIDIA GPU"
+  if ! check_nvidia_host; then
+    fail "No NVIDIA GPU (nvidia-smi)"
+    return 1
+  fi
+  ok "$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)"
+
+  if dpkg -l nvidia-container-toolkit 2>/dev/null | grep -q '^ii'; then
+    ok "nvidia-container-toolkit installed"
+  elif rpm -q nvidia-container-toolkit >/dev/null 2>&1; then
+    ok "nvidia-container-toolkit installed"
+  else
+    warn "nvidia-container-toolkit not detected"
+    add_warning "Install NVIDIA Container Toolkit for GPU in Docker:
+  https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html"
+  fi
+
+  if check_nvidia_docker; then
+    ok "GPU works inside Docker (--gpus all)"
+    return 0
+  fi
+
+  fail "GPU not available inside Docker"
+  add_missing "Configure NVIDIA Container Toolkit, then: sudo systemctl restart docker"
+  return 1
+}
+
+check_amd() {
+  log ""
+  log "AMD GPU (ROCm)"
+  if ! check_amd_host; then
+    fail "No /dev/kfd or /dev/dri (AMD GPU devices)"
+    return 1
+  fi
+  ok "/dev/kfd and /dev/dri present"
+
+  if have rocm-smi && rocm-smi --showproductname 2>/dev/null | head -1; then
+    ok "rocm-smi"
+  elif have rocminfo; then
+    ok "rocminfo"
+  else
+    warn "rocm-smi / rocminfo not installed (optional on host)"
+  fi
+
+  local groups
+  groups="$(id -Gn 2>/dev/null || true)"
+  if [[ "$groups" == *render* && "$groups" == *video* ]] \
+    || [[ "$groups" == *render* ]] || [[ "$groups" == *video* ]]; then
+    ok "user in render/video group"
+  else
+    warn "user not in render/video group (may need sudo for /dev/dri)"
+    add_warning "Add groups: sudo usermod -aG render,video \$USER  (then log out/in)"
+  fi
+
+  if [[ -n "${HSA_OVERRIDE_GFX_VERSION:-}" ]]; then
+    ok "HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION}"
+  elif have rocminfo && rocminfo 2>/dev/null | grep -qE 'gfx1030|Navi 21|RX 6'; then
+    warn "Navi 21 / RX 6000 detected — may need: export HSA_OVERRIDE_GFX_VERSION=10.3.0"
+    add_warning "If GPU fails in container, re-run with:
+  HSA_OVERRIDE_GFX_VERSION=10.3.0 ./video-watcher-docker ..."
+  fi
+  return 0
+}
+
+detect_gpu() {
+  log ""
+  log "Detecting GPU…"
+  if check_nvidia_host && check_nvidia_docker; then
+    GPU_KIND="nvidia"
+    ok "Using NVIDIA GPU (Docker)"
+    return
+  fi
+  if check_nvidia_host; then
+    warn "NVIDIA GPU on host but not in Docker — falling back to CPU for Docker"
+    GPU_KIND="none"
+    return
+  fi
+  if check_amd_host; then
+    GPU_KIND="amd"
+    ok "Using AMD GPU (Docker + ROCm image)"
+    return
+  fi
+  GPU_KIND="none"
+  ok "No GPU for Docker — using CPU image"
+}
+
+image_for_gpu() {
+  case "$GPU_KIND" in
+    nvidia) echo "$IMAGE_NVIDIA" ;;
+    amd) echo "$IMAGE_ROCM" ;;
+    *) echo "$IMAGE_CPU" ;;
+  esac
+}
+
+dockerfile_for_gpu() {
+  case "$GPU_KIND" in
+    nvidia) echo "Dockerfile.nvidia" ;;
+    amd) echo "Dockerfile.rocm" ;;
+    *) echo "Dockerfile" ;;
+  esac
+}
+
+run_checks() {
+  log "video-watcher (docker) — checking dependencies"
+  MISSING=()
+  WARNINGS=()
+
+  check_docker || true
+
+  if [[ "$FORCE_CPU" == true ]]; then
+    GPU_KIND="none"
+    log ""
+    log "GPU detection skipped (--cpu)"
+  else
+    detect_gpu
+  fi
+
+  log ""
+  log "Optional (native install, not required for Docker)"
+  if have ffmpeg; then ok "ffmpeg (host)"; else warn "ffmpeg not on host (only needed inside container)"; fi
+  if have python3; then ok "python3 (host)"; else warn "python3 not on host (Docker does not need it)"; fi
+
+  if [[ ${#WARNINGS[@]} -gt 0 ]]; then
+    log ""
+    log "Warnings:"
+    for w in "${WARNINGS[@]}"; do log "  • $w"; done
+  fi
+
+  if [[ ${#MISSING[@]} -gt 0 ]]; then
+    log ""
+    log "Missing / fix:"
+    for m in "${MISSING[@]}"; do log "  • $m"; done
+    return 1
+  fi
+
+  log ""
+  ok "All required dependencies satisfied"
+  return 0
+}
+
+build_image() {
+  local image df
+  image="$(image_for_gpu)"
+  df="$(dockerfile_for_gpu)"
+  log ""
+  log "Building $image ($df)…"
+  if "$CTR" image inspect "$image" >/dev/null 2>&1 && [[ "$REBUILD" != true ]]; then
+    ok "Image already exists ($image). Use --rebuild to rebuild."
+    return 0
+  fi
+  if ! "$CTR" build -f "${SCRIPT_DIR}/${df}" -t "$image" "${SCRIPT_DIR}"; then
+    if [[ "$GPU_KIND" != "none" ]]; then
+      warn "GPU image build failed — falling back to CPU image"
+      GPU_KIND="none"
+      image="$(image_for_gpu)"
+      df="$(dockerfile_for_gpu)"
+      "$CTR" build -f "${SCRIPT_DIR}/${df}" -t "$image" "${SCRIPT_DIR}"
+    else
+      return 1
+    fi
+  fi
+  ok "Built $image"
+}
+
+run_native() {
+  log ""
+  log "Running natively (host .venv)…"
+  if [[ ! -x "${SCRIPT_DIR}/.venv/bin/python" ]]; then
+    log "Installing native CPU env…"
+    "${SCRIPT_DIR}/install-local"
+  fi
+  local -a cmd=("${SCRIPT_DIR}/video-watcher")
+  if [[ "$GPU_KIND" != "none" ]]; then
+    cmd+=(--gpu)
+  fi
+  cmd+=("${WHISPER_ARGS[@]}" "${VIDEOS[@]}")
+  "${cmd[@]}"
+}
+
+resolve_mount_dir() {
+  local v dir first=""
+  for v in "${VIDEOS[@]}"; do
+    dir="$(cd "$(dirname "$v")" && pwd)"
+    if [[ -z "$first" ]]; then
+      first="$dir"
+    elif [[ "$dir" != "$first" ]]; then
+      log "Error: videos must be in the same folder (got $first and $dir)"
+      log "Run twice or use: ./video-watcher-docker --data-dir PARENT ..."
+      exit 1
+    fi
+  done
+  printf '%s' "$first"
+}
+
+host_to_container_paths() {
+  local -n _out=$1
+  local mount_dir="$2"
+  _out=()
+  local v base
+  for v in "${VIDEOS[@]}"; do
+    v="$(cd "$(dirname "$v")" && pwd)/$(basename "$v")"
+    base="${v#"$mount_dir"/}"
+    _out+=("/data/$base")
+  done
+}
+
+docker_run() {
+  local image gpu_flag=() mount_dir cache_dir
+  local -a user_args=()
+  image="$(image_for_gpu)"
+  if [[ "$GPU_KIND" != none ]]; then
+    gpu_flag=(--gpu)
+  fi
+
+  mount_dir="$(resolve_mount_dir)"
+  cache_dir="$(cache_dir)"
+  container_user_args user_args
+
+  local -a run_args=(
+    run --rm
+    "${user_args[@]}"
+    -e "HOME=/tmp"
+    -e "USER=${HOST_USER}"
+    -v "${mount_dir}:/data"
+    -v "${cache_dir}:/cache"
+  )
+
+  case "$GPU_KIND" in
+    nvidia)
+      run_args+=(--gpus all)
+      ;;
+    amd)
+      run_args+=(
+        --device=/dev/kfd
+        --device=/dev/dri
+        --ipc=host
+      )
+      if getent group video >/dev/null 2>&1; then
+        run_args+=(--group-add "$(getent group video | cut -d: -f3)")
+      fi
+      if getent group render >/dev/null 2>&1; then
+        run_args+=(--group-add "$(getent group render | cut -d: -f3)")
+      fi
+      if [[ -n "${HSA_OVERRIDE_GFX_VERSION:-}" ]]; then
+        run_args+=(-e "HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION}")
+      fi
+      ;;
+  esac
+
+  local -a container_videos=()
+  host_to_container_paths container_videos "$mount_dir"
+
+  log ""
+  log "Running $image as ${HOST_USER} (${HOST_UID}:${HOST_GID}) | GPU: $GPU_KIND"
+  log "  mount: ${mount_dir} → /data | cache: ${cache_dir} → /cache"
+  "$CTR" "${run_args[@]}" "$image" "${gpu_flag[@]}" "${WHISPER_ARGS[@]}" "${container_videos[@]}"
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      --list-inputs)
+        "${SCRIPT_DIR}/video-watcher" --list-inputs
+        exit 0
+        ;;
+      --check)
+        MODE="check"
+        shift
+        ;;
+      --rebuild)
+        REBUILD=true
+        shift
+        ;;
+      --cpu)
+        FORCE_CPU=true
+        shift
+        ;;
+      --data-dir)
+        DATA_DIR="$2"
+        shift 2
+        ;;
+      -o|--output-dir|-m|--model|-l|--language|-f|--formats)
+        WHISPER_ARGS+=("$1" "$2")
+        shift 2
+        ;;
+      --gpu)
+        WHISPER_ARGS+=(--gpu)
+        shift
+        ;;
+      -*)
+        log "Unknown option: $1"
+        usage
+        exit 1
+        ;;
+      *)
+        VIDEOS+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ ${#VIDEOS[@]} -gt 0 ]]; then
+    MODE="run"
+    for v in "${VIDEOS[@]}"; do
+      if [[ ! -f "$v" ]]; then
+        log "Error: not a file: $v"
+        exit 1
+      fi
+    done
+  fi
+}
+
+main() {
+  parse_args "$@"
+
+  CTR="$(container_runtime)"
+
+  if ! run_checks; then
+    log ""
+    log "Fix the items above, then run ./video-watcher-docker again."
+    exit 1
+  fi
+
+  [[ "$MODE" == check ]] && exit 0
+
+  build_image
+
+  if [[ "$MODE" == "run" ]]; then
+    if docker_run; then
+      exit 0
+    fi
+    warn "Docker run failed — trying native install"
+    run_native
+    exit $?
+  else
+    log ""
+    log "Ready. Transcribe a video:"
+    log "  ./video-watcher-docker ${DATA_DIR}/your-video.mp4"
+    log ""
+    log "Image: $(image_for_gpu)  |  Data dir: ${DATA_DIR}  |  GPU: ${GPU_KIND}"
+  fi
+}
+
+main "$@"

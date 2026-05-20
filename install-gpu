@@ -23,7 +23,7 @@ log() { printf '%s\n' "$*" >&2; }
 
 usage() {
   cat <<'EOF'
-Usage: setup-rocm [--force]
+Usage: install-gpu [--force]
 
 Installs ROCm PyTorch + openai-whisper into .venv.
 Skips if already configured (use --force to reinstall).
@@ -129,7 +129,7 @@ print('PyTorch:', torch.__version__)
   log ""
   log "GPU not visible. For RX 6000 (Navi 21), try:"
   log "  export HSA_OVERRIDE_GFX_VERSION=10.3.0"
-  log "  ${SCRIPT_DIR}/setup-rocm --force"
+  log "  ${SCRIPT_DIR}/install-gpu --force"
   exit 1
 fi
 

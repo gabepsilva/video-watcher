@@ -1,0 +1,16 @@
+# NVIDIA GPU image (requires NVIDIA Container Toolkit on the host).
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY video-watcher ./
+RUN chmod +x video-watcher \
+    && pip install -q --upgrade pip \
+    && pip install -q openai-whisper \
+    && chmod -R a+rX /app
+
+ENV XDG_CACHE_HOME=/cache
+ENTRYPOINT ["./video-watcher"]

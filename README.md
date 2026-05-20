@@ -1,49 +1,99 @@
 # video-watcher
 
-Local video captions (SRT, VTT, TXT) via [OpenAI Whisper](https://github.com/openai/whisper). No API key.
+Local captions (SRT, VTT, TXT) for audio and video via [OpenAI Whisper](https://github.com/openai/whisper). No API key.
 
-## Layout
+**Input formats:** anything **ffmpeg** can decode. List known extensions:
+
+```bash
+./video-watcher --list-inputs
+```
+
+| Video | Audio |
+|-------|-------|
+| mp4, mkv, webm, mov, avi, m4v, flv, ts, m2ts | mp3, wav, flac, ogg, opus, m4a, aac, wma |
+
+Other `audio/*` or `video/*` files (by MIME type) are accepted too.
+
+## How it works
+
+`video-watcher` runs [OpenAI Whisper](https://github.com/openai/whisper) on your file. **ffmpeg** decodes the audio; **Whisper** transcribes it. There is no intermediate MP3 on disk — audio stays in memory.
+
+```mermaid
+flowchart LR
+  MP4[Your media file]
+  FF[ffmpeg subprocess]
+  PCM[Raw audio in memory<br/>16 kHz mono PCM]
+  MEL[Log-mel spectrogram]
+  W[Whisper neural network]
+  OUT[SRT / VTT / TXT / JSON]
+
+  MP4 --> FF --> PCM --> MEL --> W --> OUT
+```
+
+1. **ffmpeg** reads the media file (video or audio), extracts the audio track, and streams **mono 16 kHz PCM** to Python via a pipe (not a temp file).
+2. Whisper converts that waveform into a **log-mel spectrogram** — the representation the model was trained on.
+3. The **Whisper model** processes the spectrogram in ~30 second chunks and predicts text (optionally forced to a language with `-l`).
+4. Caption files are written next to the input (or under `-o`).
+
+`video-watcher` only adds CLI conveniences (model, language, output dir, GPU). `video-watcher-docker` runs the same pipeline inside a container that bundles ffmpeg, PyTorch, and Whisper.
+
+## Scripts
+
+| Script | Path | Purpose |
+|--------|------|---------|
+| **video-watcher-docker** | Docker | Check deps, build image, transcribe (auto GPU) |
+| **install-local** | Local | Install CPU Whisper into `.venv` |
+| **install-gpu** | Local | Install AMD ROCm PyTorch + Whisper into `.venv` |
+| **video-watcher** | Local | Transcribe videos (after install) |
 
 ```
 video-watcher/
-  Downloads/      → symlink to ~/Downloads
-  video-watcher   # main command
-  install-cpu     # CPU setup
-  setup-rocm      # AMD GPU setup
-  .venv/          # Python env (created by install scripts)
+  video-watcher-docker      # Docker: check → build → run
+  install-local   # Local CPU setup
+  install-gpu       # Local AMD GPU setup
+  video-watcher   # Local transcribe
+  .venv/          # Created by install-* scripts
 ```
 
-## Quick start (CPU)
+## Docker (recommended)
 
 ```bash
-cd ~/Downloads/video-watcher
-./install-cpu
-./video-watcher Downloads/"OpenClaw Intro.mp4"
+./video-watcher-docker                              # check + build image
+./video-watcher-docker ~/Downloads/your-video.mp4   # transcribe
+./video-watcher-docker -m small -l en ~/Downloads/talk.mp4
+./video-watcher-docker --check                      # dependency report only
 ```
 
-## AMD GPU (ROCm)
+## Local (native)
 
 ```bash
-./setup-rocm
-./video-watcher --gpu -m small Downloads/your-video.mp4
+./install-local
+./video-watcher ~/Downloads/your-video.mp4
 ```
 
-Reinstall ROCm stack: `./setup-rocm --force`
+### AMD GPU (local)
+
+```bash
+./install-gpu
+./video-watcher --gpu -m small ~/Downloads/your-video.mp4
+```
+
+Reinstall ROCm stack: `./install-gpu --force`
 
 If GPU is not detected on RX 6800 / Navi 21:
 
 ```bash
 export HSA_OVERRIDE_GFX_VERSION=10.3.0
-./setup-rocm --force
+./install-gpu --force
 ```
 
-## Options
+## Options (`video-watcher` / `video-watcher-docker`)
 
 | Flag | Meaning |
 |------|---------|
 | `-m small` | Better accuracy, slower |
 | `-l en` | Force English |
-| `--gpu` | Use GPU (after `setup-rocm`) |
+| `--gpu` | Use GPU (local: after `install-gpu`; docker: automatic when available) |
 | `-o ./out` | Output folder for caption files |
 
 ## Convenience symlink
@@ -51,37 +101,23 @@ export HSA_OVERRIDE_GFX_VERSION=10.3.0
 From anywhere:
 
 ```bash
-~/Downloads/vw Downloads/foo.mp4
+~/Downloads/vw ~/Downloads/foo.mp4
 ```
 
-(`vw` → `video-watcher/video-watcher`)
+(`vw` → `video-watcher/video-watcher` for local, or point at `video-watcher-docker` for Docker)
 
-## Docker
+## Docker images (manual)
 
-Build once:
+`./video-watcher-docker` handles this automatically.
 
-```bash
-docker build -t video-watcher .
-```
+| Image | Dockerfile | GPU |
+|-------|------------|-----|
+| `video-watcher:cpu` | `Dockerfile` | — |
+| `video-watcher:nvidia` | `Dockerfile.nvidia` | NVIDIA + [Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) |
+| `video-watcher:rocm` | `Dockerfile.rocm` | AMD `/dev/kfd` + `/dev/dri` |
 
-Transcribe a file (mount your video folder as `/data`):
+### Run as your user
 
-```bash
-docker run --rm \
-  -v "$HOME/Downloads:/data" \
-  -v video-watcher-cache:/cache \
-  video-watcher /data/your-video.mp4
-```
+Containers start as **your UID/GID** (`--user $(id -u):$(id -g)` on Docker, `--userns=keep-id` on Podman), so caption files on mounted folders are owned by you, not root.
 
-With options:
-
-```bash
-docker run --rm \
-  -v "$HOME/Downloads:/data" \
-  -v video-watcher-cache:/cache \
-  video-watcher -m small -l en -o /data/out /data/talk.mp4
-```
-
-The named volume `video-watcher-cache` keeps Whisper model weights so later runs start faster. Caption files are written next to each input unless you pass `-o`.
-
-For NVIDIA GPU in Docker, use the host’s [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) and a CUDA-based image; this repo’s default image is CPU-only.
+Whisper models are cached on the host at `~/.cache/video-watcher` (set `VIDEO_WATCHER_CACHE` to override). Rebuild images after pulling this change: `./video-watcher-docker --rebuild`.

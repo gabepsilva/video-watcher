@@ -40,4 +40,4 @@ pip install -q --upgrade pip
 pip install -q openai-whisper
 
 log "Done. Run: ${SCRIPT_DIR}/video-watcher Downloads/your-video.mp4"
-log "For AMD GPU: ${SCRIPT_DIR}/setup-rocm"
+log "For AMD GPU: ${SCRIPT_DIR}/install-gpu"
