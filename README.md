@@ -46,6 +46,7 @@ flowchart LR
 | **install-gpu** | Local | Install AMD ROCm PyTorch + Whisper into `.venv` |
 | **setup-rocm** | Local | Alias for `install-gpu` (back-compat) |
 | **video-watcher** | Local | Transcribe media files or run `--mic` (after install) |
+| **video-watcher-web** | Local | Start the **web API** on the project **`.venv`** (avoids system Python / missing PyTorch) |
 
 ```
 video-watcher/
@@ -55,8 +56,48 @@ video-watcher/
   install-gpu             # Local AMD GPU setup
   setup-rocm              # Alias for install-gpu
   video-watcher           # Launcher → python -m vw
+  video-watcher-web       # Launcher → uvicorn web API (uses .venv; sets VIDEO_WATCHER_PYTHON)
+  web/                    # Local FastAPI + Vite UI (see “Web console” below)
   .venv/                  # Created by install-* scripts
 ```
+
+## Web console (local)
+
+Browser UI and API live under **`web/`** (decision record: `doc-internal/features/web-ui/adr-web-console.md`). Intended for **localhost** only (`127.0.0.1`).
+
+**Recommended — one launcher (uses `./.venv`, sets `VIDEO_WATCHER_PYTHON` + `VIDEO_WATCHER_REPO_ROOT`):**
+
+```bash
+# Terminal 1 — API
+./video-watcher-web
+
+# Terminal 2 — UI (Vite proxies ``/api`` to port 8765)
+cd web/ui
+npm install
+npm run dev
+```
+
+**Alternative** (manual venv + `PYTHONPATH`):
+
+```bash
+cd web/api
+PYTHONPATH=../.. ../../.venv/bin/python -m uvicorn vw_web.main:app --host 127.0.0.1 --port 8765
+```
+
+Then open **http://127.0.0.1:5173** — isolated sections for **file transcription** (async job), **YouTube**, **browser → API microphone**, and **job status** (poll + SSE + artifact links).
+
+**API tests** (fake `vw` runner by default):
+
+```bash
+.venv/bin/pip install -r web/api/requirements.txt
+cd web/api && ../../.venv/bin/python -m pytest tests/ -q
+```
+
+Useful environment variables: `VIDEO_WATCHER_WEB_JOBS_DIR` (where job workspaces are written), `VIDEO_WATCHER_WEB_HOST` / `VIDEO_WATCHER_WEB_PORT`, `VIDEO_WATCHER_PYTHON`, `VIDEO_WATCHER_REPO_ROOT` (if auto-detection of the repo root is wrong), `VIDEO_WATCHER_WEB_FAKE_RUNNER=1` (tests).
+
+If jobs fail with `ModuleNotFoundError: No module named 'torch'`, the API picked a Python without your Whisper install. Prefer **`./video-watcher-web`** (always uses `./.venv/bin/python`). Otherwise run `./install-local`, start uvicorn with **`../../.venv/bin/python`**, or set `VIDEO_WATCHER_PYTHON` to an interpreter that can `import torch`. `GET /api/meta` returns `subprocess_python` and `subprocess_torch_import_ok` for debugging.
+
+**Docker (API only):** from repo root, `docker compose -f web/docker-compose.yml up --build` then run the UI on the host with `npm run dev` in `web/ui` (proxy still targets `127.0.0.1:8765`). Rebuild the image after dependency changes.
 
 ## Docker (recommended)
 
@@ -64,6 +105,7 @@ video-watcher/
 ./video-watcher-docker                              # check + build image
 ./video-watcher-docker ~/Downloads/your-video.mp4   # transcribe
 ./video-watcher-docker -m turbo -l en ~/Downloads/talk.mp4
+./video-watcher-docker --yt --gpu -m large -l en 'https://www.youtube.com/watch?v=VIDEO_ID'
 ./video-watcher-docker --check                      # dependency report only
 ./video-watcher-docker --cpu ~/Downloads/foo.mp4     # force CPU image
 ```
@@ -128,10 +170,12 @@ export HSA_OVERRIDE_GFX_VERSION=10.3.0
 | `--mic` | Transcribe from the default microphone on pause (VAD; experimental; Ctrl+C to stop) |
 | `-o ./out` | Output folder for caption files (with `--mic`, writes `mic-YYYYMMDD-HHMMSS.txt`) |
 | `--list-inputs` | Print supported media extensions and exit |
+| `--yt` | Treat inputs as **YouTube URLs**: captions via [yt-dlp](https://github.com/yt-dlp/yt-dlp), then [youtube-transcript-api](https://github.com/jdepoix/youtube-transcript-api) if needed; if there are no captions, **download audio** with yt-dlp and run **Whisper** (`vw/yt.py`). |
 | `--summary` | After transcribe: summarize `.txt` with llama.cpp + Mermaid diagrams |
+| `--summarize` | Same as `--summary` |
 | `--summary-model` | Summary model key (default: `gemma-4-e4b`; more models later) |
 
-**Constraints:** `--summary` is not supported with `--mic`. With `--mic`, `--verbose` has no effect (phrase text is always printed). `--mic` with extra file paths prints a warning and ignores those paths.
+**Constraints:** `--summary` / `--summarize` is not supported with `--mic`. With `--mic`, `--verbose` has no effect (phrase text is always printed). `--mic` with extra file paths prints a warning and ignores those paths. **`--yt` is not supported with `--mic`.** With **`--yt`**, outputs go to **`-o` / `--output-dir`** if set, otherwise the **current working directory** (there is no input file directory). **`--yt`** installs **yt-dlp** and **youtube-transcript-api** with `install-local` / `install-gpu` / Docker images; **audio fallback** still requires **yt-dlp** on `PATH` or as `python -m yt_dlp`.
 
 **Docker-only** (`video-watcher-docker` before media paths):
 
@@ -184,6 +228,15 @@ Containers start as **your UID/GID** (`--user $(id -u):$(id -g)` on Docker, `--u
 
 Whisper models are cached on the host at `~/.video_watcher/whisper` (set `VIDEO_WATCHER_CACHE` to use a different folder). The directory is created automatically on first run.
 
+## YouTube (`--yt`)
+
+Pass **watch**, **shorts**, or **youtu.be** URLs as inputs. The tool tries **yt-dlp** subtitles first, then **youtube-transcript-api** if no subtitle file was produced; if there is still no text track, it **downloads audio** with yt-dlp and runs **Whisper**. Outputs are named **`{VIDEO_ID}.srt`** (and other formats from `-f`). Default output directory is the **current working directory** unless you set **`-o` / `--output-dir`**. **`--summary`** / **`--summarize`** runs on the generated **`{VIDEO_ID}.txt`** like file mode.
+
+```bash
+./video-watcher --yt -o ~/Downloads "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+./video-watcher --yt -l en -f srt,vtt,txt -o ~/Downloads "https://youtu.be/jNQXAC9IVRw"
+```
+
 ## Summarize transcript (`--summary`)
 
 After transcription, optionally summarize the `.txt` output with **llama.cpp** (default model: **Gemma 4 E4B** GGUF).
@@ -217,6 +270,19 @@ The GGUF is downloaded once to `~/.video_watcher/llama/` (~5 GB for Gemma 4 E4B 
 
 This section is the **canonical list** of what the current codebase supports. Module names refer to the `vw/` package.
 
+### YouTube (`--yt`)
+
+| Capability | Details |
+|------------|---------|
+| **URLs** | `youtube.com/watch`, `/shorts/`, `/embed/`, `youtu.be/…` (`vw/yt.py` `extract_video_id`). |
+| **Captions** | **yt-dlp** `--skip-download` + manual + auto subs, converted to **SRT**, parsed into segments; if that fails, **youtube-transcript-api** (`YouTubeTranscriptApi.fetch`). |
+| **Language** | `-l` selects the **subtitle language** for yt-dlp (`--sub-langs`) and the preference list for the transcript API (requested language, then **`en`** if different). With no `-l`, captions default to **`en`** for YouTube-only fetching (Whisper still auto-detects on audio fallback). |
+| **Audio fallback** | **yt-dlp** `bestaudio` to a temp file, then the same **`transcribe_file`** path as local media (`vw/cli.py`, `vw/transcribe.py`). |
+| **Outputs** | Same **`-f`** formats as file mode via Whisper **`get_writer`** (`vw/yt.py` `write_caption_outputs`); basename **`{VIDEO_ID}`**. |
+| **Output dir** | **`--output-dir`** if set; else **process working directory** (no input file path). |
+| **Summary** | **`--summary`** / **`--summarize`** after each URL, same as files; optional **`release_whisper_gpu`** if Whisper was loaded earlier in the batch (`vw/cli.py`). |
+| **Not supported** | With **`--mic`**. |
+
 ### File transcription (media → captions)
 
 | Capability | Details |
@@ -245,14 +311,14 @@ This section is the **canonical list** of what the current codebase supports. Mo
 | **Output** | Each phrase: one line to **stdout**; with `-o`, append to **`mic-YYYYMMDD-HHMMSS.txt`** in that directory. **Ctrl+C** stops, drains queued blocks, flushes the last partial phrase, then joins the transcriber so pending phrases still print. |
 | **Deps** | Python package **sounddevice** (installed by `install-local` / `install-gpu`); system **PortAudio** (e.g. `libportaudio2` on Ubuntu). |
 | **Docker** | Host **ALSA** `/dev/snd` and/or **PulseAudio / PipeWire** socket mounted in; image **auto-rebuild** if `import sounddevice` fails; `-o` host paths mapped for transcript append (`video-watcher-docker`). |
-| **Not supported** | `--summary` with `--mic`; `--verbose` with `--mic` (warning only). |
+| **Not supported** | `--summary` / `--summarize` with `--mic`; `--verbose` with `--mic` (warning only). **`--yt`** with **`--mic`**. |
 
 ### Post-transcription summary (`--summary`)
 
 | Capability | Details |
 |------------|---------|
 | **Engine** | External **llama.cpp** `llama-cli` + local **GGUF** (default **Gemma 4 E4B** Q4_K_M from Hugging Face). |
-| **Flow** | Runs **after** each file’s captions are written. If `-f` / `--formats` omits `txt`, **`txt` is added automatically** so a transcript exists for summarization (`vw/cli.py`). |
+| **Flow** | Runs **after** each file’s captions are written (or after each **`--yt`** run). If `-f` / `--formats` omits `txt`, **`txt` is added automatically** so a transcript exists for summarization (`vw/cli.py`). |
 | **GPU handoff** | When `--summary` and `--gpu` and device is CUDA, Whisper weights are **released from GPU** before spawning `llama-cli` (`vw/transcribe.py` `release_gpu`). |
 | **Output** | Timestamped **`name.YYYYMMDD-HHMMSS.summary.md`** next to the transcript; full markdown on **stdout** (`vw/summary.py`). |
 | **Passes** | (1) Overview + key points in markdown; (2) optional **Mermaid** diagrams for graph-like content (flowchart, sequence, ER, state, mindmap, etc.). |
@@ -284,10 +350,14 @@ This section is the **canonical list** of what the current codebase supports. Mo
 
 The bullets below mirror the tables above for skimming.
 
+#### YouTube
+
+- **`--yt`** — URLs → yt-dlp / transcript API captions, or audio + Whisper; **`-o`** or cwd; works with **`--summary`** / **`--summarize`**.
+
 #### Transcription (files)
 
 - **Local Whisper** — no API key or cloud; ffmpeg → mono 16 kHz PCM in memory (`vw/transcribe.py`).
-- **`vw` package** — `cli`, `transcribe`, `mic`, `progress`, `cache`, `summary`, `media`, `constants`, `env_docs`.
+- **`vw` package** — `cli`, `transcribe`, `mic`, `progress`, `cache`, `summary`, `media`, `yt`, `constants`, `env_docs`.
 - **Formats** — SRT, VTT, TXT, JSON, TSV (`-f` or `all`).
 - **Models** — `tiny` … `turbo`; `-l`; `--gpu`; progress bar or `--verbose`; multi-file; cache under `~/.video_watcher/whisper`.
 
@@ -307,7 +377,12 @@ The bullets below mirror the tables above for skimming.
 
 ### Unreleased
 
-- **Docs** — Added **Implemented features** (canonical behavior for file transcription, `--mic`, `--summary`, CLI, Docker).
+- **`--yt`** — YouTube URLs: yt-dlp captions, youtube-transcript-api fallback, then Whisper on downloaded audio (`vw/yt.py`, `vw/cli.py`).
+- **`--summarize`** — Alias for **`--summary`** (`vw/cli.py`).
+- **Deps** — `install-local` / `install-gpu` / Docker images install **yt-dlp** and **youtube-transcript-api**.
+- **Docs** — README: YouTube section, Implemented features table, options table.
+- **`-f` comma lists** — `-f srt,vtt,txt` (and `--yt`) now writes each format via `write_whisper_result` in `vw/transcribe.py` (Whisper’s `get_writer` only accepts one key or `all`).
+- **`--yt` exports** — YouTube rolling / duplicate auto-caption cues are merged and newlines flattened before writing, so **`.txt`** is not line‑triplicated and **`.tsv`** stays single‑line per row (`vw/yt.py`).
 - **`--mic`** — VAD phrase transcription (`vw/mic.py`): threaded capture, queue + sequential Whisper, 30 s max phrase, Docker audio passthrough and image checks.
 - **Install / images** — `sounddevice` + PortAudio (`libportaudio2`); `setup-rocm` alias for `install-gpu`.
 

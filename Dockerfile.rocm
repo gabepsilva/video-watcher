@@ -24,7 +24,7 @@ WORKDIR /app
 COPY video-watcher ./
 COPY vw ./vw/
 RUN python -m pip install -q --upgrade pip \
-    && python -m pip install -q openai-whisper tqdm sounddevice \
+    && python -m pip install -q openai-whisper tqdm sounddevice yt-dlp youtube-transcript-api \
     && python -c "import sounddevice, whisper" \
     && chmod -R a+rX /app
 

@@ -1,8 +1,9 @@
-.venv/
-.caption-venv/
-.cache/
-**/__pycache__/
-**/*.pyc
-.git/
-.gitignore
-Downloads
+.git
+.venv
+**/__pycache__
+*.pyc
+.pytest_cache
+**/node_modules
+web/ui/dist
+.video_watcher_web
+**/.DS_Store

@@ -56,6 +56,32 @@ def resolve_device(use_gpu: bool) -> str:
     return "cpu"
 
 
+def write_whisper_result(
+    result: dict,
+    output_format: str,
+    output_dir: Path,
+    path_for_naming: Path,
+) -> None:
+    """
+    Write Whisper-style result dict to disk. ``output_format`` is ``all``, a
+    single extension, or comma-separated (e.g. ``srt,vtt``) matching ``-f``.
+    ``path_for_naming`` supplies the basename stem (e.g. ``dir/foo.mp4`` → ``foo.srt``).
+    """
+    stem_path = str(path_for_naming)
+    out = str(output_dir)
+    fmt = output_format.strip()
+    if fmt == "all":
+        get_writer("all", out)(result, stem_path)
+        return
+    if "," in fmt:
+        for part in fmt.split(","):
+            key = part.strip().lower()
+            if key:
+                get_writer(key, out)(result, stem_path)
+        return
+    get_writer(fmt, out)(result, stem_path)
+
+
 def release_whisper_gpu(model=None) -> None:
     """Free Whisper weights on GPU before another GPU consumer (e.g. llama-cli)."""
     import gc
@@ -124,10 +150,9 @@ def transcribe_file(
         with nice_progress(path.stem):
             result = whisper.transcribe(model, str(path), **transcribe_kwargs)
 
-    writer = get_writer(output_format, str(output_dir))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        writer(result, str(path))
+        write_whisper_result(result, output_format, output_dir, path)
 
     if release_gpu:
         _status("Releasing Whisper from GPU …")

@@ -41,7 +41,7 @@ fi
 log "Creating venv and installing openai-whisper (CPU)..."
 python3 -m venv "${VENV_DIR}"
 pip install -q --upgrade pip
-pip install -q openai-whisper sounddevice
+pip install -q openai-whisper sounddevice yt-dlp youtube-transcript-api
 
 log "Done. Run: ${SCRIPT_DIR}/video-watcher Downloads/your-video.mp4"
 log "For AMD GPU: ${SCRIPT_DIR}/install-gpu"

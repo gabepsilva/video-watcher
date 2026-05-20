@@ -48,6 +48,7 @@ Examples:
   ./video-watcher-docker
   ./video-watcher-docker ~/Downloads/talk.mp4
   ./video-watcher-docker -m small -l en ~/Downloads/*.mp4
+  ./video-watcher-docker --yt --gpu -m large -l en 'https://www.youtube.com/watch?v=VIDEO_ID'
   ./video-watcher-docker --mic -m turbo -l en --gpu
   ./video-watcher-docker --mic -m turbo -o ~/Downloads
   ./video-watcher-docker --check
@@ -64,6 +65,8 @@ Transcription flags (passed through to video-watcher / vw):
   --gpu                  Use GPU inside the container (when image supports it)
   --verbose              Live transcript text instead of progress bar
   --summary              After transcribe, summarize .txt (llama-cli built into the image)
+  --summarize            Same as --summary
+  --yt                   YouTube URLs: captions (yt-dlp + transcript API) or Whisper on audio
   --summary-model KEY    Summary model (default: gemma-4-e4b)
   --mic                  Microphone mode — transcribe on pause (host ALSA/Pulse; Ctrl+C to stop)
 
@@ -339,6 +342,12 @@ resolve_mount_dir() {
     mic_mount_dir
     return
   fi
+  if wants_yt && all_videos_are_http_urls; then
+    local data="${DATA_DIR/#\~/$HOME}"
+    mkdir -p "$data"
+    cd "$data" && pwd
+    return
+  fi
   local v dir first=""
   for v in "${VIDEOS[@]}"; do
     dir="$(cd "$(dirname "$v")" && pwd)"
@@ -359,6 +368,10 @@ host_to_container_paths() {
   _out=()
   local v base
   for v in "${VIDEOS[@]}"; do
+    if wants_yt && [[ "$v" =~ ^https?:// ]]; then
+      _out+=("$v")
+      continue
+    fi
     v="$(cd "$(dirname "$v")" && pwd)/$(basename "$v")"
     base="${v#"$mount_dir"/}"
     _out+=("/data/$base")
@@ -368,9 +381,28 @@ host_to_container_paths() {
 wants_summary() {
   local arg
   for arg in "${WHISPER_ARGS[@]}"; do
-    [[ "$arg" == --summary ]] && return 0
+    [[ "$arg" == --summary || "$arg" == --summarize ]] && return 0
   done
   return 1
+}
+
+wants_yt() {
+  local arg
+  for arg in "${WHISPER_ARGS[@]}"; do
+    [[ "$arg" == --yt ]] && return 0
+  done
+  return 1
+}
+
+all_videos_are_http_urls() {
+  local v
+  [[ ${#VIDEOS[@]} -eq 0 ]] && return 1
+  for v in "${VIDEOS[@]}"; do
+    if [[ ! "$v" =~ ^https?:// ]]; then
+      return 1
+    fi
+  done
+  return 0
 }
 
 wants_mic() {
@@ -527,6 +559,9 @@ docker_run() {
 
   if wants_mic; then
     container_whisper_args whisper_args
+  elif wants_yt; then
+    container_whisper_args whisper_args
+    host_to_container_paths container_videos "$mount_dir"
   else
     whisper_args=("${WHISPER_ARGS[@]}")
     host_to_container_paths container_videos "$mount_dir"
@@ -540,6 +575,9 @@ docker_run() {
     fi
   elif [[ -t 1 ]]; then
     run_args+=(-t)
+  fi
+  if ! wants_mic; then
+    run_args+=(-w /data)
   fi
   run_args+=(
     "${user_args[@]}"
@@ -618,7 +656,7 @@ parse_args() {
         WHISPER_ARGS+=("$1" "$2")
         shift 2
         ;;
-      --gpu|--verbose|--summary|--mic)
+      --gpu|--verbose|--summary|--summarize|--yt|--mic)
         WHISPER_ARGS+=("$1")
         shift
         ;;
@@ -636,12 +674,19 @@ parse_args() {
 
   if [[ ${#VIDEOS[@]} -gt 0 ]]; then
     MODE="run"
-    for v in "${VIDEOS[@]}"; do
-      if [[ ! -f "$v" ]]; then
-        log "Error: not a file: $v"
+    if wants_yt; then
+      if ! all_videos_are_http_urls; then
+        log "Error: with --yt, every path argument must be an http(s) URL (YouTube), not a local file."
         exit 1
       fi
-    done
+    else
+      for v in "${VIDEOS[@]}"; do
+        if [[ ! -f "$v" ]]; then
+          log "Error: not a file: $v"
+          exit 1
+        fi
+      done
+    fi
   elif wants_mic; then
     MODE="run"
   fi

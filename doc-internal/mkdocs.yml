@@ -1,0 +1,7 @@
+site_name: video-watcher internal
+docs_dir: .
+nav:
+  - Home: index.md
+  - Features:
+      - Web console (ADR): features/web-ui/adr-web-console.md
+      - Web console (E2E): features/web-ui/e2e-web-console.md

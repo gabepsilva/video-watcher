@@ -1,0 +1,18 @@
+# API-only image: Whisper + ffmpeg in a venv (same as ./install-local).
+FROM python:3.12-slim-bookworm
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /repo
+COPY . .
+
+RUN chmod +x install-local video-watcher video-watcher-web 2>/dev/null || true \
+  && ./install-local
+
+ENV PYTHONPATH=/repo
+WORKDIR /repo/web/api
+EXPOSE 8765
+
+CMD ["/repo/.venv/bin/python", "-m", "uvicorn", "vw_web.main:app", "--host", "0.0.0.0", "--port", "8765"]

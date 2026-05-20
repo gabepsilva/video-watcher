@@ -16,5 +16,10 @@ Thumbs.db
 *.swp
 *~
 
-# Optional local symlink (see README)
-Downloads
+# Web UI build output / deps
+web/ui/node_modules/
+web/ui/dist/
+
+# Web API job workspaces (default under repo when not overridden)
+.video_watcher_web/
+
