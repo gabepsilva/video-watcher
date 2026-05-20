@@ -52,8 +52,21 @@ Examples:
 
 Local path: ./install-local  then  ./video-watcher FILE
 
+Transcription flags (passed through to video-watcher / vw):
+  -o, --output-dir DIR   Output directory for caption files
+  -m, --model NAME       Whisper model: tiny, base, small, medium, large
+  -l, --language CODE    Language code, e.g. en, es
+  -f, --formats LIST     srt,vtt,txt,json,tsv,all
+  --gpu                  Use GPU inside the container (when image supports it)
+  --verbose              Live transcript text instead of progress bar
+
+Environment variables:
+  VIDEO_WATCHER_CACHE    Host cache dir → /cache (default: ~/.video_watcher)
+  VIDEO_WATCHER_DATA     Default mount for /data (default: ~/Downloads)
+  CONTAINER_RUNTIME      docker (default) or podman
+  HSA_OVERRIDE_GFX_VERSION   AMD workaround, e.g. 10.3.0 for RX 6000 / Navi 21
+
 Containers run as your host user (UID:GID) so caption files are owned by you, not root.
-Cache: ~/.video_watcher (override with VIDEO_WATCHER_CACHE).
 EOF
 }
 
@@ -368,11 +381,16 @@ docker_run() {
   cache_dir="$(cache_dir)"
   container_user_args user_args
 
-  local -a run_args=(
-    run --rm
+  local -a run_args=(run --rm)
+  if [[ -t 1 ]]; then
+    run_args+=(-t)
+  fi
+  run_args+=(
     "${user_args[@]}"
     -e "HOME=/tmp"
     -e "USER=${HOST_USER}"
+    -e "PYTHONUNBUFFERED=1"
+    -e "TERM=${TERM:-xterm-256color}"
     -v "${mount_dir}:/data"
     -v "${cache_dir}:/cache"
   )
@@ -441,6 +459,10 @@ parse_args() {
         ;;
       --gpu)
         WHISPER_ARGS+=(--gpu)
+        shift
+        ;;
+      --verbose)
+        WHISPER_ARGS+=(--verbose)
         shift
         ;;
       -*)

@@ -1,273 +1,32 @@
 #!/usr/bin/env bash
-# video-watcher: generate captions (SRT, VTT, TXT) from media via local Whisper.
+# video-watcher: thin launcher for the vw Python package.
 set -euo pipefail
-
-# Any format ffmpeg can decode (Whisper pipes audio through ffmpeg).
-readonly -a MEDIA_EXTENSIONS=(
-  mp4 mkv webm mov avi m4v flv ts m2ts
-  mp3 wav flac ogg opus m4a aac wma
-)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${SCRIPT_DIR}/.venv"
-
-# Whisper models: ~/.video_watcher/whisper (override with VIDEO_WATCHER_CACHE).
-export XDG_CACHE_HOME="${VIDEO_WATCHER_CACHE:-$HOME/.video_watcher}"
-mkdir -p "${XDG_CACHE_HOME}"
-MODEL="${WHISPER_MODEL:-base}"
-LANGUAGE=""
-OUTPUT_DIR=""
-FORMATS="all"
-USE_GPU=false
-
-list_accepted_inputs() {
-  local video audio
-  video="mp4 mkv webm mov avi m4v flv ts m2ts"
-  audio="mp3 wav flac ogg opus m4a aac wma"
-  cat <<EOF
-Accepted input files (decoded by ffmpeg):
-
-  Video:  ${video}
-  Audio:  ${audio}
-
-Other files recognized as audio/* or video/* (via the file(1) command) are
-also accepted. Anything ffmpeg can decode will work even if not listed above.
-EOF
-}
-
-usage() {
-  cat <<EOF
-Usage: video-watcher [OPTIONS] MEDIA [MEDIA ...]
-
-Transcribe audio or video file(s) and write caption files next to each input
-(same basename: .srt, .vtt, .txt, .json, .tsv).
-
-Options:
-  -o, --output-dir DIR   Write all outputs here (default: same dir as input)
-  -m, --model NAME       Whisper model: tiny, base, small, medium, large (default: base)
-  -l, --language CODE    Language code, e.g. en, es (default: auto-detect)
-  -f, --formats LIST     Comma-separated: srt,vtt,txt,json,tsv,all (default: all)
-  --gpu                  Use AMD/NVIDIA GPU (requires ./install-gpu on AMD)
-  --list-inputs          Print accepted input file types and exit
-  -h, --help             Show this help
-
-Environment:
-  WHISPER_MODEL          Same as --model
-  VIDEO_WATCHER_CACHE    Model cache directory (default: ~/.video_watcher)
-
-Examples:
-  ./video-watcher Downloads/"OpenClaw Intro.mp4"
-  ./video-watcher -m small -l en --gpu podcast.mp3
-  ./video-watcher interview.wav recording.ogg lecture.mkv
-  ./video-watcher -o ./out Downloads/*.{mp4,mp3,wav}
-
-No OpenAI API key required — runs Whisper locally.
-For AMD GPU: run ./install-gpu once, then use --gpu.
-
-$(list_accepted_inputs)
-EOF
-}
-
-log() { printf '%s\n' "$*" >&2; }
-
-media_extension() {
-  local base ext
-  base="$(basename "$1")"
-  [[ "$base" == *.* ]] || return 1
-  ext="${base##*.}"
-  printf '%s' "${ext,,}"
-}
-
-is_known_media_extension() {
-  local ext="$1" known
-  for known in "${MEDIA_EXTENSIONS[@]}"; do
-    [[ "$ext" == "$known" ]] && return 0
-  done
-  return 1
-}
-
-looks_like_media() {
-  local path="$1" ext mime
-  ext="$(media_extension "$path" 2>/dev/null || true)"
-  if [[ -n "$ext" ]] && is_known_media_extension "$ext"; then
-    return 0
-  fi
-  if command -v file >/dev/null 2>&1; then
-    mime="$(file -b --mime-type "$path" 2>/dev/null || true)"
-    [[ "$mime" == audio/* || "$mime" == video/* ]] && return 0
-  fi
-  return 1
-}
-
-validate_media() {
-  local path="$1" ext
-  if looks_like_media "$path"; then
-    return 0
-  fi
-  ext="$(media_extension "$path" 2>/dev/null || printf '%s' '(none)')"
-  log "Error: unsupported or unknown media type: $path (extension: .${ext})"
-  log "Run: ${SCRIPT_DIR}/video-watcher --list-inputs"
-  log "ffmpeg must be able to decode the file; install ffmpeg if missing."
-  return 1
-}
-
-PYTHON=""
+export PYTHONPATH="${SCRIPT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 
 resolve_python() {
   if [[ -n "${VIDEO_WATCHER_PYTHON:-}" ]]; then
-    PYTHON="${VIDEO_WATCHER_PYTHON}"
-  elif [[ -x "${VENV_DIR}/bin/python" ]] \
-    && "${VENV_DIR}/bin/python" -m whisper --help >/dev/null 2>&1; then
-    PYTHON="${VENV_DIR}/bin/python"
-  elif command -v python3 >/dev/null 2>&1 \
-    && python3 -m whisper --help >/dev/null 2>&1; then
-    PYTHON="$(command -v python3)"
+    printf '%s' "${VIDEO_WATCHER_PYTHON}"
+  elif [[ -x "${VENV_DIR}/bin/python" ]]; then
+    printf '%s' "${VENV_DIR}/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    command -v python3
   else
     return 1
   fi
 }
 
-migrate_venv() {
-  local old="${SCRIPT_DIR}/.caption-venv"
-  if [[ -d "$old" && ! -d "$VENV_DIR" ]]; then
-    log "Migrating .caption-venv → .venv ..."
-    mv "$old" "$VENV_DIR"
-  fi
-}
+if ! PY="$(resolve_python)"; then
+  printf '%s\n' "No Python found. Run: ${SCRIPT_DIR}/install-local" >&2
+  printf '%s\n' "Or use Docker: ${SCRIPT_DIR}/video-watcher-docker" >&2
+  exit 1
+fi
 
-gpu_available() {
-  "${PYTHON}" -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null
-}
+if ! "${PY}" -c "import whisper" >/dev/null 2>&1; then
+  printf '%s\n' "Whisper not installed. Run: ${SCRIPT_DIR}/install-local" >&2
+  exit 1
+fi
 
-ensure_venv() {
-  migrate_venv
-  if ! resolve_python; then
-    log "No Whisper install found."
-    log "  Docker:  ${SCRIPT_DIR}/video-watcher-docker"
-    log "  Local:   ${SCRIPT_DIR}/install-local   then  ./video-watcher FILE"
-    log "  AMD GPU: ${SCRIPT_DIR}/install-gpu      then  ./video-watcher --gpu FILE"
-    exit 1
-  fi
-}
-
-parse_args() {
-  if [[ $# -eq 0 ]]; then
-    usage
-    exit 1
-  fi
-
-  local media=()
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      -h|--help)
-        usage
-        exit 0
-        ;;
-      --list-inputs)
-        list_accepted_inputs
-        exit 0
-        ;;
-      -o|--output-dir)
-        OUTPUT_DIR="$2"
-        shift 2
-        ;;
-      -m|--model)
-        MODEL="$2"
-        shift 2
-        ;;
-      -l|--language)
-        LANGUAGE="$2"
-        shift 2
-        ;;
-      -f|--formats)
-        FORMATS="$2"
-        shift 2
-        ;;
-      --gpu)
-        USE_GPU=true
-        shift
-        ;;
-      -*)
-        log "Unknown option: $1"
-        usage
-        exit 1
-        ;;
-      *)
-        media+=("$1")
-        shift
-        ;;
-    esac
-  done
-
-  if [[ ${#media[@]} -eq 0 ]]; then
-    log "Error: provide at least one audio or video file."
-    usage
-    exit 1
-  fi
-
-  for v in "${media[@]}"; do
-    if [[ ! -f "$v" ]]; then
-      log "Error: not a file: $v"
-      exit 1
-    fi
-    validate_media "$v" || exit 1
-  done
-
-  ensure_venv
-
-  if [[ "$USE_GPU" == true ]] && ! gpu_available; then
-    log "Error: --gpu requested but PyTorch sees no GPU."
-    log "On AMD: run ${SCRIPT_DIR}/install-gpu"
-    exit 1
-  fi
-
-  for v in "${media[@]}"; do
-    transcribe_one "$v"
-  done
-}
-
-transcribe_one() {
-  local input="$1"
-  local abs_video
-  abs_video="$(cd "$(dirname "$input")" && pwd)/$(basename "$input")"
-  local out_dir
-  if [[ -n "$OUTPUT_DIR" ]]; then
-    out_dir="$(mkdir -p "$OUTPUT_DIR" && cd "$OUTPUT_DIR" && pwd)"
-  else
-    out_dir="$(dirname "$abs_video")"
-  fi
-
-  local base
-  base="$(basename "$abs_video")"
-  base="${base%.*}"
-
-  log ""
-  log "Transcribing: $abs_video"
-  log "Model: $MODEL | Output dir: $out_dir | GPU: $USE_GPU"
-
-  local -a cmd=(
-    "${PYTHON}" -m whisper
-    "$abs_video"
-    --model "$MODEL"
-    --output_dir "$out_dir"
-    --output_format "$FORMATS"
-  )
-  if [[ -n "$LANGUAGE" ]]; then
-    cmd+=(--language "$LANGUAGE")
-  fi
-  if [[ "$USE_GPU" == true ]]; then
-    cmd+=(--device cuda)
-  fi
-
-  "${cmd[@]}"
-
-  log "Done:"
-  for ext in srt vtt txt json tsv; do
-    local f="${out_dir}/${base}.${ext}"
-    if [[ -f "$f" ]]; then
-      log "  $f"
-    fi
-  done
-}
-
-parse_args "$@"
+exec "${PY}" -m vw "$@"

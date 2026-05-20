@@ -7,10 +7,11 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY video-watcher ./
-RUN chmod +x video-watcher \
-    && pip install -q --upgrade pip \
+COPY vw ./vw/
+RUN pip install -q --upgrade pip \
     && pip install -q openai-whisper \
     && chmod -R a+rX /app
 
+ENV PYTHONPATH=/app
 ENV XDG_CACHE_HOME=/cache
-ENTRYPOINT ["./video-watcher"]
+ENTRYPOINT ["python", "-m", "vw"]

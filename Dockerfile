@@ -8,12 +8,13 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY install-local video-watcher ./
+COPY vw ./vw/
 RUN chmod +x install-local video-watcher \
     && ./install-local \
     && chmod -R a+rX /app
 
-# Persist downloaded Whisper weights (bind-mount ~/.video_watcher → /cache).
+ENV PYTHONPATH=/app
 ENV XDG_CACHE_HOME=/cache
 
-ENTRYPOINT ["./video-watcher"]
+ENTRYPOINT ["python", "-m", "vw"]
 CMD ["--help"]
