@@ -22,5 +22,15 @@ def whisper_model_dir() -> Path:
     return setup_cache() / "whisper"
 
 
+def whisper_checkpoint_path(model_name: str) -> Path:
+    """Path where openai-whisper stores a named model checkpoint."""
+    from whisper import _MODELS
+
+    if model_name not in _MODELS:
+        raise ValueError(f"Unknown Whisper model: {model_name!r}")
+    url = _MODELS[model_name]
+    return whisper_model_dir() / Path(url).name
+
+
 def llama_model_dir() -> Path:
     return setup_cache() / "llama"

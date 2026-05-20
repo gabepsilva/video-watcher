@@ -26,7 +26,14 @@ MEDIA_EXTENSIONS: frozenset[str] = frozenset(
 
 OUTPUT_EXTENSIONS: tuple[str, ...] = ("srt", "vtt", "txt", "json", "tsv")
 
-WHISPER_MODELS: tuple[str, ...] = ("tiny", "base", "small", "medium", "large")
+WHISPER_MODELS: tuple[str, ...] = (
+    "tiny",
+    "base",
+    "small",
+    "medium",
+    "large",
+    "turbo",
+)
 
 # llama.cpp summary models (GGUF). More keys can be added later.
 DEFAULT_SUMMARY_MODEL = "gemma-4-e4b"

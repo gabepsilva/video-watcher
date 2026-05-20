@@ -88,6 +88,14 @@ def nice_progress(label: str) -> Iterator[None]:
         yield
 
 
+@contextlib.contextmanager
+def whisper_model_load_progress(model_name: str) -> Iterator[None]:
+    """Patch tqdm during whisper.load_model (download + load weights)."""
+    factory = _tqdm_factory(model_name)
+    with patch("whisper.__init__.tqdm", factory):
+        yield
+
+
 def print_file_header(path, model: str, device: str, duration_sec: float) -> None:
     from pathlib import Path
 

@@ -24,9 +24,12 @@ if ! PY="$(resolve_python)"; then
   exit 1
 fi
 
+printf '%s\n' "video-watcher: checking environment …" >&2
+
 if ! "${PY}" -c "import whisper" >/dev/null 2>&1; then
   printf '%s\n' "Whisper not installed. Run: ${SCRIPT_DIR}/install-local" >&2
   exit 1
 fi
 
+export PYTHONUNBUFFERED=1
 exec "${PY}" -m vw "$@"

@@ -148,7 +148,7 @@ The GGUF is downloaded once to `~/.video_watcher/llama/` (~5 GB for Gemma 4 E4B 
 - **Local Whisper** — no API key or cloud; ffmpeg pipes mono 16 kHz PCM into Whisper (no temp audio file)
 - **Multiple caption formats** — SRT, VTT, TXT, JSON, TSV (`-f` or `all`)
 - **Audio and video inputs** — mp4, mkv, mp3, wav, ogg, flac, and more; `--list-inputs` for the full set
-- **Configurable Whisper models** — `tiny` through `large`, plus language forcing (`-l en`)
+- **Configurable Whisper models** — `tiny` through `large`, plus `turbo` (large-v3-turbo), and language forcing (`-l en`)
 - **Progress bar** — time-based bar with ETA; `--verbose` for live transcript text instead
 - **Batch-friendly** — transcribe several files in one command
 

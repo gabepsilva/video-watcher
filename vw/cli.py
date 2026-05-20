@@ -14,10 +14,8 @@ from vw.constants import (
     SUMMARY_MODELS,
     WHISPER_MODELS,
 )
-from vw.summary import summarize_transcript_file
 from vw.env_docs import local_env_epilog
 from vw.media import format_media_list, is_supported_media
-from vw.transcribe import list_output_files, resolve_device, transcribe_file
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -88,6 +86,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _status(msg: str) -> None:
+    print(msg, file=sys.stderr, flush=True)
+
+
 def resolve_output_dir(input_path: Path, output_dir: str | None) -> Path:
     if output_dir:
         out = Path(output_dir).expanduser().resolve()
@@ -110,7 +112,6 @@ def main(argv: list[str] | None = None) -> int:
         print("\nerror: provide at least one media file.", file=sys.stderr)
         return 1
 
-    device = resolve_device(args.gpu)
     paths = [Path(p).expanduser() for p in args.media]
 
     output_format = args.formats
@@ -126,6 +127,12 @@ def main(argv: list[str] | None = None) -> int:
             print("Run: video-watcher --list-inputs", file=sys.stderr)
             return 1
 
+    _status("Loading PyTorch and Whisper …")
+    from vw.transcribe import list_output_files, resolve_device, transcribe_file
+
+    device = resolve_device(args.gpu)
+    _status(f"Device: {device}  |  Model: {args.model}")
+
     for path in paths:
         abs_path = path.resolve()
         out_dir = resolve_output_dir(abs_path, args.output_dir)
@@ -137,6 +144,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"Model: {args.model} | Output: {out_dir} | GPU: {args.gpu}",
                 file=sys.stderr,
             )
+
+        _status(f"File: {abs_path.name}")
 
         try:
             transcribe_file(
@@ -158,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {out_file}", file=sys.stderr)
 
         if args.summary:
+            from vw.summary import summarize_transcript_file
+
             txt_path = out_dir / f"{stem}.txt"
             if not txt_path.is_file():
                 print(f"error: transcript missing: {txt_path}", file=sys.stderr)

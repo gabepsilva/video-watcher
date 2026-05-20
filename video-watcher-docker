@@ -54,7 +54,7 @@ Local path: ./install-local  then  ./video-watcher FILE
 
 Transcription flags (passed through to video-watcher / vw):
   -o, --output-dir DIR   Output directory for caption files
-  -m, --model NAME       Whisper model: tiny, base, small, medium, large
+  -m, --model NAME       Whisper model: tiny, base, small, medium, large, turbo
   -l, --language CODE    Language code, e.g. en, es
   -f, --formats LIST     srt,vtt,txt,json,tsv,all
   --gpu                  Use GPU inside the container (when image supports it)
