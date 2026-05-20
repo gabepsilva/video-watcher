@@ -25,7 +25,17 @@ from vw_web.job_store import JobStore, SSE_END
 from vw_web.meta import meta_payload
 from vw_web.mic_transcribe import transcribe_audio_file
 from vw_web.models import JobKind, JobState
+from vw_web.artifacts import (
+    EDITABLE_EXTENSIONS,
+    MAX_EDIT_BYTES,
+    artifact_file,
+    is_editable,
+    job_input_file,
+    serve_media_file,
+    source_media_payload,
+)
 from vw_web.runner import runner_for_job
+from vw_web.runtime_policy import require_container_runtime, resolve_container_ready
 
 
 def _safe_filename(name: str | None) -> str:
@@ -60,23 +70,6 @@ def _validate_summary_model(summary_model: str) -> None:
         raise HTTPException(status_code=422, detail=f"unknown summary model: {summary_model}")
 
 
-_SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
-
-
-def _artifact_file(job_work_dir: Path, name: str) -> Path:
-    if not _SAFE_NAME.fullmatch(name):
-        raise HTTPException(status_code=404, detail="invalid artifact name")
-    out_dir = (job_work_dir / "out").resolve()
-    candidate = (out_dir / name).resolve()
-    try:
-        candidate.relative_to(out_dir)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="not found") from exc
-    if not candidate.is_file():
-        raise HTTPException(status_code=404, detail="not found")
-    return candidate
-
-
 class JobSummary(BaseModel):
     id: str
     kind: str
@@ -86,6 +79,17 @@ class JobSummary(BaseModel):
     error: str | None = None
 
 
+class SourceMedia(BaseModel):
+    name: str
+    url: str
+
+
+class JobArtifact(BaseModel):
+    name: str
+    url: str
+    editable: bool = False
+
+
 class JobDetail(BaseModel):
     id: str
     kind: str
@@ -93,11 +97,11 @@ class JobDetail(BaseModel):
     created_at: str
     exit_code: int | None = None
     error: str | None = None
-    artifacts: list[dict[str, str]] = Field(default_factory=list)
-    log_tail: list[str] = Field(default_factory=list)
+    source_media: SourceMedia | None = None
+    artifacts: list[JobArtifact] = Field(default_factory=list)
 
 
-def _artifacts_for_job(job_id: str, work_dir: Path) -> list[dict[str, str]]:
+def _artifacts_for_job(job_id: str, work_dir: Path) -> list[JobArtifact]:
     """List downloadable files under ``out/`` (promote Docker ``--yt`` outputs from job root)."""
     out_dir = work_dir / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -109,12 +113,18 @@ def _artifacts_for_job(job_id: str, work_dir: Path) -> list[dict[str, str]]:
                     shutil.copy2(p, dest)
                 except OSError:
                     pass
-    items: list[dict[str, str]] = []
+    items: list[JobArtifact] = []
     if not out_dir.is_dir():
         return items
     for p in sorted(out_dir.iterdir()):
         if p.is_file():
-            items.append({"name": p.name, "url": f"/api/jobs/{job_id}/files/{p.name}"})
+            items.append(
+                JobArtifact(
+                    name=p.name,
+                    url=f"/api/jobs/{job_id}/files/{p.name}",
+                    editable=is_editable(p.name),
+                )
+            )
     return items
 
 
@@ -139,7 +149,7 @@ async def _execute_job(app: FastAPI, job_id: str) -> None:
     def log_line(msg: str) -> None:
         store.publish_log(job_id, msg)
 
-    runner = runner_for_job(settings, use_docker=bool(meta.get("use_docker")))
+    runner = runner_for_job(settings)
     work = partial(
         runner.run,
         job_id=job_id,
@@ -198,7 +208,7 @@ def create_app() -> FastAPI:
         # Re-check Docker on each request (fast); GPU uses startup probe + host devices.
         return {
             **request.app.state.api_meta_static,
-            **runtime_meta(settings, refresh_docker=True),
+            **runtime_meta(settings),
         }
 
     @app.get("/api/health/live")
@@ -229,6 +239,7 @@ def create_app() -> FastAPI:
         if job is None:
             raise HTTPException(status_code=404, detail="unknown job")
         artifacts = _artifacts_for_job(job.id, job.work_dir)
+        src = source_media_payload(job.id, job.work_dir)
         return JobDetail(
             id=job.id,
             kind=job.kind,
@@ -236,8 +247,8 @@ def create_app() -> FastAPI:
             created_at=job.created_at.isoformat(),
             exit_code=job.exit_code,
             error=job.error,
+            source_media=SourceMedia(**src) if src else None,
             artifacts=artifacts,
-            log_tail=job.log_lines[-200:],
         )
 
     @app.get("/api/jobs/{job_id}/events")
@@ -272,13 +283,55 @@ def create_app() -> FastAPI:
         return StreamingResponse(gen(), media_type="text/event-stream")
 
     @app.get("/api/jobs/{job_id}/files/{name}")
-    async def download_file(job_id: str, name: str, request: Request) -> FileResponse:
+    async def download_file(
+        job_id: str,
+        name: str,
+        request: Request,
+        download: bool = False,
+    ) -> FileResponse:
         store: JobStore = request.app.state.job_store
         job = store.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="unknown job")
-        path = _artifact_file(job.work_dir, name)
-        return FileResponse(path)
+        path = artifact_file(job.work_dir, name)
+        return serve_media_file(path, as_download=download)
+
+    @app.put("/api/jobs/{job_id}/files/{name}")
+    async def update_artifact_file(job_id: str, name: str, request: Request) -> dict[str, str]:
+        if not is_editable(name):
+            raise HTTPException(
+                status_code=422,
+                detail=f"file is not editable (allowed: {', '.join(sorted(EDITABLE_EXTENSIONS))})",
+            )
+        store: JobStore = request.app.state.job_store
+        job = store.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="unknown job")
+        raw = await request.body()
+        if len(raw) > MAX_EDIT_BYTES:
+            raise HTTPException(status_code=413, detail=f"body exceeds {MAX_EDIT_BYTES} bytes")
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=422, detail="body must be UTF-8 text") from exc
+        path = artifact_file(job.work_dir, name)
+        path.write_text(text, encoding="utf-8")
+        return {"name": name, "status": "saved"}
+
+    @app.get("/api/jobs/{job_id}/input")
+    async def download_input_file(
+        job_id: str,
+        request: Request,
+        download: bool = False,
+    ) -> FileResponse:
+        store: JobStore = request.app.state.job_store
+        job = store.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="unknown job")
+        path = job_input_file(job.work_dir)
+        if path is None:
+            raise HTTPException(status_code=404, detail="no input media for this job")
+        return serve_media_file(path, as_download=download)
 
     @app.post("/api/jobs", status_code=202)
     async def create_job(
@@ -289,7 +342,6 @@ def create_app() -> FastAPI:
         formats: str = Form("all"),
         language: str | None = Form(None),
         gpu: bool = Form(False),
-        use_docker: bool = Form(False),
         verbose: bool = Form(False),
         summary: bool = Form(False),
         summary_model: str = Form("gemma-4-e4b"),
@@ -298,16 +350,16 @@ def create_app() -> FastAPI:
     ) -> dict[str, str]:
         store: JobStore = request.app.state.job_store
         settings: Settings = request.app.state.settings
-        body = {**request.app.state.api_meta_static, **runtime_meta(settings, refresh_docker=True)}
-        if use_docker and not body.get("docker_available"):
-            raise HTTPException(
-                status_code=422,
-                detail="Docker is not available on this host (install docker/podman and ensure the daemon is running)",
-            )
+        body = {**request.app.state.api_meta_static, **runtime_meta(settings)}
+        resolve_container_ready(
+            container_runtime=settings.container_runtime,
+            fake_runner=settings.fake_runner,
+            torch_ok=settings.torch_import_ok,
+        )
         if gpu and not body.get("gpu_available"):
             raise HTTPException(
                 status_code=422,
-                detail="GPU is not available for the configured Python interpreter",
+                detail="GPU is not available in this container (rebuild with a GPU image or use CPU)",
             )
 
         jt = job_type.strip().lower()
@@ -358,7 +410,6 @@ def create_app() -> FastAPI:
             "formats": fm,
             "language": lng,
             "gpu": gpu,
-            "use_docker": use_docker,
             "verbose": verbose,
             "summary": summary,
             "summary_model": summary_model,
@@ -380,25 +431,33 @@ def create_app() -> FastAPI:
     ) -> dict[str, Any]:
         _validate_model(model)
         settings: Settings = request.app.state.settings
-        if gpu and not (settings.torch_import_ok and settings.gpu_cuda_ok):
+        body = {**request.app.state.api_meta_static, **runtime_meta(settings)}
+        require_container_runtime(
+            container_runtime=settings.container_runtime,
+            fake_runner=settings.fake_runner,
+            torch_ok=settings.torch_import_ok,
+        )
+        if gpu and not body.get("gpu_available"):
             raise HTTPException(
                 status_code=422,
-                detail="GPU is not available for in-process mic (native PyTorch CUDA/ROCm required)",
+                detail="GPU is not available in this container (rebuild with a GPU image or use CPU)",
             )
         suffix = Path(_safe_filename(audio.filename)).suffix or ".webm"
-        tmp = Path(tempfile.gettempdir()) / f"vw-mic-{secrets.token_hex(8)}{suffix}"
+        work = Path(tempfile.mkdtemp(prefix="vw-mic-"))
+        tmp = work / f"phrase{suffix}"
         tmp.write_bytes(await audio.read())
         try:
-            return await transcribe_audio_file(
-                tmp,
-                model=model,
-                language=language.strip() if language else None,
-                gpu=gpu,
-            )
-        finally:
             try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
+                return await transcribe_audio_file(
+                    tmp,
+                    settings=settings,
+                    model=model,
+                    language=language.strip() if language else None,
+                    gpu=gpu,
+                )
+            except RuntimeError as exc:
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
 
     return app

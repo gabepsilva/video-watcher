@@ -1,25 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import type { JobDetail } from "../api";
 import { getJob } from "../api";
-import { Icons } from "../icons/Icons";
+import { ArtifactsCard } from "../components/artifacts/ArtifactsCard";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { StateBadge } from "../components/ui/StateBadge";
+import { Icons } from "../icons/Icons";
 
 type Props = {
   jobId: string;
   onBack: () => void;
 };
 
-function extOf(name: string): string {
-  const i = name.lastIndexOf(".");
-  return i >= 0 ? name.slice(i + 1).toLowerCase() : "file";
-}
-
 export function JobDetailView({ jobId, onBack }: Props) {
   const [job, setJob] = useState<JobDetail | null>(null);
   const [streamLog, setStreamLog] = useState("");
   const streamRef = useRef("");
+  const logElRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,6 +56,13 @@ export function JobDetailView({ jobId, onBack }: Props) {
     return () => es.close();
   }, [jobId]);
 
+  useEffect(() => {
+    const el = logElRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [streamLog]);
+
   const state = job?.state ?? "…";
 
   return (
@@ -96,31 +100,12 @@ export function JobDetailView({ jobId, onBack }: Props) {
         }
         flush
       >
-        <pre className="log-view log-view--plain">{streamLog || "…"}</pre>
+        <pre ref={logElRef} className="log-view log-view--plain">
+          {streamLog || "…"}
+        </pre>
       </Card>
 
-      <Card title="Artifacts" sub={`${job?.artifacts?.length ?? 0} files`} flush>
-        {job?.artifacts?.length ? (
-          job.artifacts.map((a) => (
-            <div key={a.name} className="artifact-row">
-              <div className="artifact-row__fmt" data-fmt={extOf(a.name)}>
-                {extOf(a.name)}
-              </div>
-              <div className="artifact-row__name">{a.name}</div>
-              <a className="btn btn--sm" href={a.url} download>
-                <Icons.Download size={13} />
-                Download
-              </a>
-            </div>
-          ))
-        ) : (
-          <div style={{ padding: 24, color: "var(--dim)", fontSize: 13 }}>No files yet (job may still be running).</div>
-        )}
-      </Card>
-
-      <Card title="Log tail (poll)" flush>
-        <pre className="log-view log-view--plain">{job?.log_tail?.join("\n") || "…"}</pre>
-      </Card>
+      <ArtifactsCard jobId={jobId} job={job} />
     </div>
   );
 }

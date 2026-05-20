@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ApiMeta, JobSummary } from "./api";
 import { getMeta, listJobs } from "./api";
 import { ConsoleShell } from "./components/layout/ConsoleShell";
+import { RuntimeGate } from "./components/layout/RuntimeGate";
 import { Sidebar, type Route } from "./components/layout/Sidebar";
 import { TopBar } from "./components/layout/TopBar";
 import { useTheme } from "./hooks/useTheme";
@@ -16,7 +17,6 @@ export function App() {
   const [meta, setMeta] = useState<ApiMeta | null>(null);
   const [metaErr, setMetaErr] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [runtime, setRuntime] = useState<"native" | "docker">("native");
   const [route, setRoute] = useState<Route>("new");
   const [jobs, setJobs] = useState<JobSummary[]>([]);
 
@@ -24,10 +24,7 @@ export function App() {
     setMetaErr(null);
     setRefreshing(true);
     void getMeta()
-      .then((m) => {
-        setMeta(m);
-        setRuntime((r) => (!m.docker_available && r === "docker" ? "native" : r));
-      })
+      .then(setMeta)
       .catch((e: unknown) => setMetaErr(e instanceof Error ? e.message : String(e)))
       .finally(() => setRefreshing(false));
   }, []);
@@ -48,6 +45,9 @@ export function App() {
     return () => window.clearInterval(id);
   }, [loadJobs]);
 
+  const runtimeOk =
+    !meta ||
+    (meta.container_runtime === true && meta.subprocess_torch_import_ok !== false);
   const activeJobs = jobs.filter((j) => j.state === "running" || j.state === "queued");
   const runningCount = jobs.filter((j) => j.state === "running").length;
 
@@ -61,20 +61,20 @@ export function App() {
   );
 
   let main = null;
-  if (typeof route === "object") {
-    main = <JobDetailView jobId={route.job} onBack={() => setRoute("jobs")} />;
-  } else if (route === "new") {
-    main = <ComposerView meta={meta} runtime={runtime} onJobStarted={onJobStarted} />;
-  } else if (route === "mic") {
-    main = <MicView meta={meta} />;
-  } else if (route === "jobs") {
-    main = <JobsView jobs={jobs} onOpenJob={openJob} onNewJob={() => setRoute("new")} />;
-  } else if (route === "history") {
-    main = <JobsView jobs={jobs} onOpenJob={openJob} onNewJob={() => setRoute("new")} historyOnly />;
-  } else if (route === "diag") {
-    main = (
-      <DiagnosticsView meta={meta} metaErr={metaErr} onRefresh={loadMeta} refreshing={refreshing} />
-    );
+  if (runtimeOk) {
+    if (typeof route === "object") {
+      main = <JobDetailView jobId={route.job} onBack={() => setRoute("jobs")} />;
+    } else if (route === "new") {
+      main = <ComposerView meta={meta} onJobStarted={onJobStarted} />;
+    } else if (route === "mic") {
+      main = <MicView meta={meta} />;
+    } else if (route === "jobs") {
+      main = <JobsView jobs={jobs} onOpenJob={openJob} onNewJob={() => setRoute("new")} />;
+    } else if (route === "diag") {
+      main = (
+        <DiagnosticsView meta={meta} metaErr={metaErr} onRefresh={loadMeta} refreshing={refreshing} />
+      );
+    }
   }
 
   return (
@@ -83,8 +83,6 @@ export function App() {
         <TopBar
           meta={meta}
           metaErr={metaErr}
-          runtime={runtime}
-          setRuntime={setRuntime}
           theme={theme}
           onToggleTheme={toggleTheme}
           onRefresh={loadMeta}
@@ -100,7 +98,9 @@ export function App() {
         />
       }
     >
-      {main}
+      <RuntimeGate meta={meta} metaErr={metaErr}>
+        {main}
+      </RuntimeGate>
     </ConsoleShell>
   );
 }

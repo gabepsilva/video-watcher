@@ -1,9 +1,12 @@
-.git
 .venv
+**/.venv
+**/node_modules
+web/ui/dist
+.git
+.video_watcher_web
 **/__pycache__
 *.pyc
 .pytest_cache
-**/node_modules
-web/ui/dist
-.video_watcher_web
-**/.DS_Store
+.coverage
+htmlcov
+*.egg-info

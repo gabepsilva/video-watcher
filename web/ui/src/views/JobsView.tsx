@@ -9,7 +9,6 @@ type Props = {
   jobs: JobSummary[];
   onOpenJob: (id: string) => void;
   onNewJob: () => void;
-  historyOnly?: boolean;
 };
 
 function jobTitle(j: JobSummary): string {
@@ -72,22 +71,16 @@ function JobSection({
   );
 }
 
-export function JobsView({ jobs, onOpenJob, onNewJob, historyOnly }: Props) {
+export function JobsView({ jobs, onOpenJob, onNewJob }: Props) {
   const running = jobs.filter((j) => j.state === "running");
   const queued = jobs.filter((j) => j.state === "queued");
   const recent = jobs.filter((j) => j.state !== "running" && j.state !== "queued");
 
-  const list = historyOnly ? recent : jobs;
-  const title = historyOnly ? "History" : "Jobs";
-  const sub = historyOnly
-    ? "Completed and failed transcriptions."
-    : "One transcription runs at a time. Newer jobs queue when the worker is busy.";
-
   return (
     <div className="page">
       <PageHead
-        title={title}
-        sub={sub}
+        title="Jobs"
+        sub="One transcription runs at a time. Newer jobs queue when the worker is busy."
         actions={
           <Button onClick={onNewJob}>
             <Icons.Plus size={14} stroke={1.8} />
@@ -96,31 +89,19 @@ export function JobsView({ jobs, onOpenJob, onNewJob, historyOnly }: Props) {
         }
       />
 
-      {!historyOnly ? (
-        <>
-          <JobSection
-            title="Active"
-            sub={`${running.length} running · ${queued.length} queued`}
-            jobs={[...running, ...queued]}
-            onOpenJob={onOpenJob}
-          />
-          <Card title="Recent" sub={`${recent.length}`} flush>
-            {recent.length > 0 ? (
-              recent.map((j) => <JobRow key={j.id} job={j} onClick={() => onOpenJob(j.id)} />)
-            ) : (
-              <div style={{ padding: 24, color: "var(--dim)", fontSize: 13 }}>No completed jobs yet.</div>
-            )}
-          </Card>
-        </>
-      ) : (
-        <Card title="All finished" sub={`${list.length}`} flush>
-          {list.length > 0 ? (
-            list.map((j) => <JobRow key={j.id} job={j} onClick={() => onOpenJob(j.id)} />)
-          ) : (
-            <div style={{ padding: 24, color: "var(--dim)", fontSize: 13 }}>No history yet.</div>
-          )}
-        </Card>
-      )}
+      <JobSection
+        title="Active"
+        sub={`${running.length} running · ${queued.length} queued`}
+        jobs={[...running, ...queued]}
+        onOpenJob={onOpenJob}
+      />
+      <Card title="Recent" sub={`${recent.length}`} flush>
+        {recent.length > 0 ? (
+          recent.map((j) => <JobRow key={j.id} job={j} onClick={() => onOpenJob(j.id)} />)
+        ) : (
+          <div style={{ padding: 24, color: "var(--dim)", fontSize: 13 }}>No completed jobs yet.</div>
+        )}
+      </Card>
     </div>
   );
 }

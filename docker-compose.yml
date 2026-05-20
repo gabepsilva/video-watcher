@@ -1,0 +1,44 @@
+# Web console: API + UI. From repo root: docker compose up --build
+services:
+  api:
+    build:
+      context: .
+      dockerfile: web/Dockerfile.api
+    ports:
+      - "${VIDEO_WATCHER_WEB_PORT:-8765}:8765"
+    environment:
+      VIDEO_WATCHER_RUNTIME: container
+      VIDEO_WATCHER_WEB_HOST: 0.0.0.0
+      VIDEO_WATCHER_REPO_ROOT: /repo
+      PYTHONPATH: /repo
+      VIDEO_WATCHER_CACHE: /cache
+      XDG_CACHE_HOME: /cache
+    volumes:
+      - vw-jobs:/repo/.video_watcher_web/jobs
+      - vw-cache:/cache
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/repo/.venv/bin/python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health/live')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  ui:
+    build:
+      context: .
+      dockerfile: web/Dockerfile.ui
+    ports:
+      - "${VIDEO_WATCHER_UI_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  vw-jobs:
+  vw-cache:

@@ -46,7 +46,7 @@ export function DiagnosticsView({ meta, metaErr, onRefresh, refreshing }: Props)
     <div className="page">
       <PageHead
         title="Diagnostics"
-        sub="What the API can see right now. Refreshes the capability probe on each request."
+        sub="Compose stack — Whisper runs in the API container via python -m vw."
         actions={
           <Button onClick={onRefresh} disabled={refreshing}>
             <Icons.Refresh size={13} stroke={1.8} />
@@ -71,13 +71,14 @@ export function DiagnosticsView({ meta, metaErr, onRefresh, refreshing }: Props)
           value={pending ? "…" : meta?.gpu_available ? "yes" : "none"}
         />
         <DiagRow
-          label="Native CUDA/ROCm in PyTorch"
+          label="CUDA/ROCm in container"
           status={pending ? undefined : meta?.gpu_cuda_native ? "ok" : "warn"}
-          value={pending ? "…" : meta?.gpu_cuda_native ? "available" : "not visible — use Docker runtime for GPU"}
+          value={pending ? "…" : meta?.gpu_cuda_native ? "available" : "CPU image — rebuild API with GPU base for --gpu"}
         />
         <DiagRow
-          label="Host GPU devices"
-          value={pending ? "…" : meta?.host_gpu_devices ? "present" : "—"}
+          label="Container runtime"
+          status={pending ? undefined : meta?.container_runtime ? "ok" : "err"}
+          value={pending ? "…" : meta?.container_runtime ? "VIDEO_WATCHER_RUNTIME=container" : "not in compose"}
         />
       </Card>
 
@@ -93,14 +94,14 @@ export function DiagnosticsView({ meta, metaErr, onRefresh, refreshing }: Props)
         <DiagRow
           label="PyTorch importable"
           status={pending ? undefined : meta?.subprocess_torch_import_ok ? "ok" : "err"}
-          value={pending ? "…" : meta?.subprocess_torch_import_ok ? "import torch → ok" : "missing — run ./install-local"}
+          value={
+            pending
+              ? "…"
+              : meta?.subprocess_torch_import_ok
+                ? "import torch → ok"
+                : "missing — docker compose build --no-cache api"
+          }
         />
-        <DiagRow
-          label="Docker daemon"
-          status={pending ? undefined : meta?.docker_available ? "ok" : "err"}
-          value={pending ? "…" : meta?.docker_available ? "running" : "not detected"}
-        />
-        <DiagRow label="Docker launcher" value={meta?.docker_script ?? "…"} />
       </Card>
 
       <Card
@@ -120,7 +121,7 @@ export function DiagnosticsView({ meta, metaErr, onRefresh, refreshing }: Props)
         title="API"
         flush
       >
-        <DiagRow label="Bind" status="ok" value="127.0.0.1:8765 · localhost only · no auth" />
+        <DiagRow label="Bind" status="ok" value="api:8765 · ui:80 · no auth" />
         <DiagRow label="Repo root" value={meta?.repo_root ?? "…"} />
       </Card>
     </div>

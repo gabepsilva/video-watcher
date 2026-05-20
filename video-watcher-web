@@ -1,22 +1,13 @@
 #!/usr/bin/env bash
-# Start the local web API with the same Python as ./video-watcher (project .venv).
+# Deprecated: web console runs only via Docker Compose.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PYTHONPATH="${SCRIPT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
-export VIDEO_WATCHER_REPO_ROOT="${SCRIPT_DIR}"
 
-VENV_PY="${SCRIPT_DIR}/.venv/bin/python"
-if [[ ! -x "$VENV_PY" ]]; then
-  printf '%s\n' "video-watcher-web: no venv at ${VENV_PY}" >&2
-  printf '%s\n' "Run: ${SCRIPT_DIR}/install-local   (or install-gpu)" >&2
-  exit 1
-fi
+printf '%s\n' "video-watcher-web is deprecated." >&2
+printf '%s\n' "Start the console with Docker Compose from the repo root:" >&2
+printf '%s\n' "  cd ${SCRIPT_DIR} && docker compose up --build" >&2
+printf '%s\n' "Then open http://127.0.0.1:8080 (UI; API on port 8765)." >&2
 
-export VIDEO_WATCHER_PYTHON="${VENV_PY}"
-
-HOST="${VIDEO_WATCHER_WEB_HOST:-127.0.0.1}"
-PORT="${VIDEO_WATCHER_WEB_PORT:-8765}"
-
-cd "${SCRIPT_DIR}/web/api"
-exec "${VENV_PY}" -m uvicorn vw_web.main:app --host "${HOST}" --port "${PORT}"
+cd "${SCRIPT_DIR}"
+exec docker compose up --build "$@"

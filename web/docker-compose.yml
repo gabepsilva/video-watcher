@@ -1,11 +1,2 @@
-# Local API in Docker (rebuild after changing dependencies: docker compose ... build --no-cache).
-services:
-  api:
-    build:
-      context: ..
-      dockerfile: web/Dockerfile.api
-    ports:
-      - "8765:8765"
-    environment:
-      PYTHONPATH: /repo
-      VIDEO_WATCHER_REPO_ROOT: /repo
+# Moved to the repository root. From the repo root run:
+#   docker compose up --build

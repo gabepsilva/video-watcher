@@ -1,7 +1,21 @@
-# `web/` — local console
+# `web/` — browser console (Docker Compose only)
 
-- **`api/`** — FastAPI service (`vw_web`). Prefer repo root **`./video-watcher-web`** (uses `.venv` and sets `VIDEO_WATCHER_PYTHON`). See root `README.md`.
-- **`ui/`** — Vite + React UI. Run `npm install` then `npm run dev`; `/api` is proxied to `127.0.0.1:8765`.
-- **`docker-compose.yml`** + **`Dockerfile.api`** — API in Docker (`docker compose -f web/docker-compose.yml up --build` from repo root).
+From the **repository root**:
 
-Internal design + QA matrix: `doc-internal/features/web-ui/`.
+```bash
+docker compose up --build
+```
+
+Open **http://127.0.0.1:8080**.
+
+| Path | Role |
+|------|------|
+| `api/` | FastAPI (`vw_web`) — runs in the `api` service |
+| `ui/` | Vite + React — built into the `ui` service (nginx) |
+| `Dockerfile.api` | API image (Whisper + uvicorn) |
+| `Dockerfile.ui` | UI image (npm build + nginx) |
+| `nginx.conf` | Proxies `/api` → `http://api:8765` |
+
+Host `./video-watcher-web` and `npm run dev` are **deprecated** for normal use.
+
+Internal design: `doc-internal/features/web-ui/`.

@@ -49,11 +49,6 @@ export const Icons = {
       <path d="M12 18v3" />
     </Icon>
   ),
-  List: (p: IconProps) => (
-    <Icon {...p}>
-      <path d="M4 6h16M4 12h16M4 18h10" />
-    </Icon>
-  ),
   Activity: (p: IconProps) => (
     <Icon {...p}>
       <path d="M3 12h4l2-6 4 12 2-6h6" />

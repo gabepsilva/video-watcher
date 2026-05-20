@@ -1,4 +1,4 @@
-# API-only image: Whisper + ffmpeg in a venv (same as ./install-local).
+# API container: Whisper + ffmpeg + FastAPI; all jobs run ``python -m vw`` in-process.
 FROM python:3.12-slim-bookworm
 
 RUN apt-get update \
@@ -8,10 +8,18 @@ RUN apt-get update \
 WORKDIR /repo
 COPY . .
 
-RUN chmod +x install-local video-watcher video-watcher-web 2>/dev/null || true \
-  && ./install-local
+RUN chmod +x install-local 2>/dev/null || true \
+  && ./install-local \
+  && /repo/.venv/bin/pip install --no-cache-dir -r web/api/requirements.txt
 
 ENV PYTHONPATH=/repo
+ENV VIDEO_WATCHER_RUNTIME=container
+ENV VIDEO_WATCHER_REPO_ROOT=/repo
+ENV VIDEO_WATCHER_CACHE=/cache
+ENV XDG_CACHE_HOME=/cache
+ENV VIDEO_WATCHER_WEB_HOST=0.0.0.0
+ENV VIDEO_WATCHER_WEB_PORT=8765
+
 WORKDIR /repo/web/api
 EXPOSE 8765
 

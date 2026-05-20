@@ -6,35 +6,19 @@ import { CapChip } from "../ui/CapChip";
 type Props = {
   meta: ApiMeta | null;
   metaErr: string | null;
-  runtime: "native" | "docker";
-  setRuntime: (r: "native" | "docker") => void;
   theme: Theme;
   onToggleTheme: () => void;
   onRefresh: () => void;
   refreshing: boolean;
 };
 
-export function TopBar({
-  meta,
-  metaErr,
-  runtime,
-  setRuntime,
-  theme,
-  onToggleTheme,
-  onRefresh,
-  refreshing,
-}: Props) {
+export function TopBar({ meta, metaErr, theme, onToggleTheme, onRefresh, refreshing }: Props) {
   const pending = meta === null && !metaErr;
+  const containerRuntime = meta?.container_runtime === true;
   const gpuAvailable = meta?.gpu_available === true;
-  const dockerAvailable = meta?.docker_available === true;
-  const torchOk = meta?.subprocess_torch_import_ok === true;
 
-  const gpuStatus = !gpuAvailable ? "err" : runtime === "native" && !meta?.gpu_cuda_native ? "warn" : "ok";
-  const gpuLabel = !gpuAvailable
-    ? "off"
-    : meta?.gpu_cuda_native
-      ? "CUDA/ROCm (native)"
-      : "GPU (Docker)";
+  const gpuStatus = !gpuAvailable ? "err" : "ok";
+  const gpuLabel = gpuAvailable ? "on" : "off";
 
   return (
     <header className="topbar console__topbar">
@@ -45,41 +29,19 @@ export function TopBar({
           </span>
         ) : (
           <>
+            <CapChip
+              label="Runtime"
+              value={pending ? "…" : containerRuntime ? "container" : "host"}
+              status={pending ? "none" : containerRuntime ? "ok" : "err"}
+              title="Compose API container"
+            />
             <CapChip label="GPU" value={pending ? "…" : gpuLabel} status={pending ? "none" : gpuStatus} />
-            <CapChip
-              label="Docker"
-              value={pending ? "…" : dockerAvailable ? "ready" : "missing"}
-              status={pending ? "none" : dockerAvailable ? "ok" : "err"}
-            />
-            <CapChip
-              label="PyTorch"
-              value={pending ? "…" : torchOk ? "ok" : "missing"}
-              status={pending ? "none" : torchOk ? "ok" : "err"}
-            />
             <div className="topbar__divider" />
-            <CapChip label="API" value="127.0.0.1:8765" status="ok" />
+            <CapChip label="API" value="compose" status="ok" />
           </>
         )}
       </div>
       <div className="topbar__actions">
-        <div className="runtime-switch" role="group" aria-label="Runtime">
-          <button
-            type="button"
-            className={`runtime-switch__btn${runtime === "native" ? " runtime-switch__btn--on" : ""}`}
-            onClick={() => setRuntime("native")}
-          >
-            Native
-          </button>
-          <button
-            type="button"
-            className={`runtime-switch__btn${runtime === "docker" ? " runtime-switch__btn--on" : ""}`}
-            onClick={() => setRuntime("docker")}
-            disabled={pending || !dockerAvailable}
-            title={dockerAvailable ? "Run inside video-watcher-docker" : "Docker not detected"}
-          >
-            Docker
-          </button>
-        </div>
         <button
           type="button"
           className="icon-btn"

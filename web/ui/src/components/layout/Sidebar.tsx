@@ -4,7 +4,6 @@ export type Route =
   | "new"
   | "mic"
   | "jobs"
-  | "history"
   | "diag"
   | { job: string };
 
@@ -78,12 +77,6 @@ export function Sidebar({ route, onRoute, activeJobCount, runningCount }: Props)
         countLive={runningCount > 0}
         active={key === "jobs" || onJob}
         onClick={() => onRoute("jobs")}
-      />
-      <NavItem
-        icon={Icons.List}
-        label="History"
-        active={key === "history"}
-        onClick={() => onRoute("history")}
       />
 
       <div className="nav__label">System</div>

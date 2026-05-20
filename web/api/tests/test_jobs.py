@@ -95,3 +95,67 @@ async def test_sse_replays_logs(monkeypatch, tmp_path) -> None:
                     break
 
         assert "fake runner" in buf
+
+
+@pytest.mark.asyncio
+async def test_put_artifact_updates_txt(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("VIDEO_WATCHER_WEB_FAKE_RUNNER", "1")
+    monkeypatch.setenv("VIDEO_WATCHER_WEB_JOBS_DIR", str(tmp_path))
+
+    from vw_web.app import create_app
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        files = {"file": ("clip.wav", b"RIFF", "audio/wav")}
+        data = {"job_type": "file", "model": "tiny", "formats": "txt"}
+        r = await client.post("/api/jobs", data=data, files=files)
+        job_id = r.json()["job_id"]
+
+        for _ in range(50):
+            jr = await client.get(f"/api/jobs/{job_id}")
+            if jr.json()["state"] in ("succeeded", "failed"):
+                break
+            await asyncio.sleep(0.05)
+        assert jr.json()["state"] == "succeeded"
+
+        put = await client.put(
+            f"/api/jobs/{job_id}/files/clip.txt",
+            content="edited caption line",
+            headers={"content-type": "text/plain; charset=utf-8"},
+        )
+        assert put.status_code == 200, put.text
+
+        dl = await client.get(f"/api/jobs/{job_id}/files/clip.txt")
+        assert dl.text == "edited caption line"
+
+
+@pytest.mark.asyncio
+async def test_file_job_exposes_source_media_and_input_download(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("VIDEO_WATCHER_WEB_FAKE_RUNNER", "1")
+    monkeypatch.setenv("VIDEO_WATCHER_WEB_JOBS_DIR", str(tmp_path))
+
+    from vw_web.app import create_app
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        files = {"file": ("clip.wav", b"RIFF-WAVE", "audio/wav")}
+        data = {"job_type": "file", "model": "tiny", "formats": "txt"}
+        r = await client.post("/api/jobs", data=data, files=files)
+        job_id = r.json()["job_id"]
+
+        body = (await client.get(f"/api/jobs/{job_id}")).json()
+        assert body["source_media"] == {"name": "clip.wav", "url": f"/api/jobs/{job_id}/input"}
+
+        inp = await client.get(f"/api/jobs/{job_id}/input")
+        assert inp.status_code == 200
+        assert inp.content.startswith(b"RIFF")
+        assert "inline" in inp.headers.get("content-disposition", "")
+        assert inp.headers.get("content-type", "").startswith("audio/")
+
+        dl = await client.get(f"/api/jobs/{job_id}/input", params={"download": True})
+        assert dl.status_code == 200
+        assert "attachment" in dl.headers.get("content-disposition", "")
+
+

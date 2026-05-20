@@ -119,34 +119,28 @@ class Settings:
     host: str
     port: int
     fake_runner: bool
+    container_runtime: bool
     torch_import_ok: bool
     gpu_cuda_ok: bool
 
 
-def runtime_meta(settings: Settings, *, refresh_docker: bool = True) -> dict[str, str | bool]:
+def runtime_meta(settings: Settings) -> dict[str, str | bool]:
     """Extra fields for ``GET /api/meta`` (operator diagnostics)."""
-    from vw_web.capabilities import docker_available, host_gpu_devices
-
     if settings.fake_runner:
-        docker_ok = False
         gpu_ok = False
-        host_gpu = False
     else:
-        docker_ok = docker_available() if refresh_docker else False
-        host_gpu = host_gpu_devices()
-        gpu_ok = (settings.torch_import_ok and settings.gpu_cuda_ok) or (
-            docker_ok and host_gpu
-        )
+        gpu_ok = settings.torch_import_ok and settings.gpu_cuda_ok
 
     return {
         "repo_root": str(settings.repo_root),
+        "container_runtime": settings.container_runtime,
         "subprocess_python": str(settings.python_executable),
         "subprocess_torch_import_ok": settings.torch_import_ok,
         "gpu_available": gpu_ok,
         "gpu_cuda_native": settings.gpu_cuda_ok,
-        "host_gpu_devices": host_gpu,
-        "docker_available": docker_ok,
-        "docker_script": str(settings.repo_root / "video-watcher-docker"),
+        # Legacy keys — UI/tests may still read these; always false for compose-only console.
+        "docker_available": False,
+        "docker_required": False,
     }
 
 
@@ -163,6 +157,9 @@ def load_settings() -> Settings:
         "true",
         "yes",
     )
+    from vw_web.runtime_policy import is_container_runtime
+
+    container_runtime = is_container_runtime()
     py_exec, torch_ok = resolve_vw_python(repo_root)
     from vw_web.capabilities import torch_cuda_available
 
@@ -176,6 +173,7 @@ def load_settings() -> Settings:
         host=host,
         port=port,
         fake_runner=fake_runner,
+        container_runtime=container_runtime,
         torch_import_ok=torch_ok,
         gpu_cuda_ok=gpu_cuda,
     )

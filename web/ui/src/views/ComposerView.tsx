@@ -3,7 +3,6 @@ import type { ApiMeta } from "../api";
 import { createJob } from "../api";
 import { Icons } from "../icons/Icons";
 import { Button } from "../components/ui/Button";
-import { Callout } from "../components/ui/Callout";
 import { Dropzone } from "../components/ui/Dropzone";
 import { FormatChips } from "../components/ui/FormatChips";
 import { Field, FieldHelp, FieldLabel, FieldRow, SelectInput, TextInput } from "../components/ui/Field";
@@ -12,7 +11,6 @@ import { PageHead } from "../components/ui/PageHead";
 
 type Props = {
   meta: ApiMeta | null;
-  runtime: "native" | "docker";
   onJobStarted: (jobId: string) => void;
 };
 
@@ -21,7 +19,7 @@ function parseFormats(selected: string[]): string {
   return selected.join(",");
 }
 
-export function ComposerView({ meta, runtime, onJobStarted }: Props) {
+export function ComposerView({ meta, onJobStarted }: Props) {
   const [mode, setMode] = useState<ComposerMode>("file");
   const [file, setFile] = useState<File | null>(null);
   const [url, setUrl] = useState("");
@@ -57,7 +55,6 @@ export function ComposerView({ meta, runtime, onJobStarted }: Props) {
     const verboseEl = form.elements.namedItem("verbose") as HTMLInputElement | null;
     const summaryEl = form.elements.namedItem("summary") as HTMLInputElement | null;
     fd.set("gpu", gpuEl?.checked ? "true" : "false");
-    fd.set("use_docker", runtime === "docker" ? "true" : "false");
     fd.set("verbose", verboseEl?.checked ? "true" : "false");
     fd.set("summary", summaryEl?.checked ? "true" : "false");
 
@@ -77,13 +74,12 @@ export function ComposerView({ meta, runtime, onJobStarted }: Props) {
   }
 
   const canSubmit = (mode === "file" && file) || (mode === "youtube" && url.trim().length > 0);
-  const useDocker = runtime === "docker";
 
   return (
     <div className="page">
       <PageHead
         title="New transcription"
-        sub="Captions, plain text, or JSON — entirely on this machine. Choose a source and Whisper does the rest."
+        sub="File upload or YouTube URL — Whisper runs in the API container (docker compose)."
       />
 
       <ModeTabs
@@ -94,18 +90,6 @@ export function ComposerView({ meta, runtime, onJobStarted }: Props) {
           { id: "youtube", label: (<><Icons.Yt size={14} /> YouTube</>) },
         ]}
       />
-
-      {useDocker && meta && !meta.docker_available ? (
-        <Callout variant="err" title="Docker requested but not detected">
-          Switch back to native, or install Docker and refresh capabilities.
-        </Callout>
-      ) : null}
-      {!useDocker && meta && meta.subprocess_torch_import_ok === false ? (
-        <Callout title="PyTorch not importable on the configured Python">
-          Run <code>./install-local</code> (or <code>./install-gpu</code>), use <code>./video-watcher-web</code>, or
-          switch the runtime to Docker for this job.
-        </Callout>
-      ) : null}
 
       <form key={gpuDefault ? "gpu-on" : "gpu-off"} onSubmit={onSubmit}>
         <section className="card">
@@ -201,7 +185,7 @@ export function ComposerView({ meta, runtime, onJobStarted }: Props) {
           <div className="submit-bar">
             <div className="submit-bar__summary">
               <span>
-                Runtime: <b>{useDocker ? "Docker" : "native"}</b>
+                Runtime: <b>Docker</b>
               </span>
             </div>
             <Button type="submit" variant="primary" disabled={busy || !canSubmit}>

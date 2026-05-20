@@ -26,6 +26,22 @@ async def test_meta_lists_models(monkeypatch, tmp_path) -> None:
     assert "repo_root" in body
     assert "gpu_available" in body
     assert "docker_available" in body
+    assert body.get("docker_required") is False
     assert "popular_languages" in body
     assert "format_presets" in body
     assert "en" in body["popular_languages"]
+
+
+@pytest.mark.asyncio
+async def test_meta_container_runtime_flag(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("VIDEO_WATCHER_RUNTIME", "container")
+    monkeypatch.setenv("VIDEO_WATCHER_WEB_JOBS_DIR", str(tmp_path))
+    monkeypatch.delenv("VIDEO_WATCHER_WEB_FAKE_RUNNER", raising=False)
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/api/meta")
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("container_runtime") is True
+    assert body.get("docker_required") is False

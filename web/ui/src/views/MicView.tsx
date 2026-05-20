@@ -143,8 +143,8 @@ export function MicView({ meta }: Props) {
         title="Microphone"
         sub={
           <>
-            Quick phrase capture from your browser. Whisper runs in the API process — different from{" "}
-            <code className="u-mono">vw --mic</code> in the terminal (live VAD).
+            Browser phrase capture → uploaded to the API → transcribed in the API container. Not the CLI{" "}
+            <code className="u-mono">vw --mic</code> live VAD mode.
           </>
         }
       />
@@ -212,9 +212,9 @@ export function MicView({ meta }: Props) {
             />
             <span>
               <div className="checkbox-row__lbl">GPU</div>
-              <div className="checkbox-row__sub">
-                {gpuAvailable ? "Native CUDA/ROCm in API process" : "Unavailable"}
-              </div>
+                <div className="checkbox-row__sub">
+                  {gpuAvailable ? "Host GPU passed into Docker" : "Unavailable without Docker + GPU"}
+                </div>
             </span>
           </label>
         </div>

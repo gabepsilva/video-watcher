@@ -1,6 +1,8 @@
 # video-watcher
 
-Local captions (SRT, VTT, TXT) for audio and video via [OpenAI Whisper](https://github.com/openai/whisper). No API key. Optional **live microphone** (VAD) and **llama.cpp** transcript summaries. For a full list of behavior, see [Implemented features](#implemented-features).
+**video-watcher** transcribes audio and video on your machine, then optionally summarizes the transcript with a local LLM. Feed it common **video** files (**mp4**, **mkv**, **webm**, **mov**, **avi**, **m4v**, **flv**, **ts**, **m2ts**) or **audio** (**mp3**, **wav**, **flac**, **ogg**, **opus**, **m4a**, **aac**, **wma**) — plus anything else **ffmpeg** can decode — and get searchable captions and plain-text transcripts. From there you can **search** the text and **chat with an LLM** about what was said in the recording (CLI, web console, or your own tools on the output files).
+
+Local captions (SRT, VTT, TXT) via [OpenAI Whisper](https://github.com/openai/whisper). No API key. Optional **live microphone** (VAD) and **llama.cpp** transcript summaries. For a full list of behavior, see [Implemented features](#implemented-features).
 
 **Input formats:** anything **ffmpeg** can decode. List known extensions:
 
@@ -46,7 +48,8 @@ flowchart LR
 | **install-gpu** | Local | Install AMD ROCm PyTorch + Whisper into `.venv` |
 | **setup-rocm** | Local | Alias for `install-gpu` (back-compat) |
 | **video-watcher** | Local | Transcribe media files or run `--mic` (after install) |
-| **video-watcher-web** | Local | Start the **web API** on the project **`.venv`** (avoids system Python / missing PyTorch) |
+| **docker compose up** | Docker | Start the **web console** (API + UI containers) |
+| **video-watcher-web** | Deprecated | Alias for `docker compose up --build` |
 
 ```
 video-watcher/
@@ -56,48 +59,46 @@ video-watcher/
   install-gpu             # Local AMD GPU setup
   setup-rocm              # Alias for install-gpu
   video-watcher           # Launcher → python -m vw
-  video-watcher-web       # Launcher → uvicorn web API (uses .venv; sets VIDEO_WATCHER_PYTHON)
+  docker-compose.yml      # Web console: API + UI (docker compose up --build)
+  video-watcher-web       # Deprecated → docker compose up --build
   web/                    # Local FastAPI + Vite UI (see “Web console” below)
   .venv/                  # Created by install-* scripts
 ```
 
-## Web console (local)
+## Web console (Docker Compose)
 
-Browser UI and API live under **`web/`** (decision record: `doc-internal/features/web-ui/adr-web-console.md`). Intended for **localhost** only (`127.0.0.1`).
-
-**Recommended — one launcher (uses `./.venv`, sets `VIDEO_WATCHER_PYTHON` + `VIDEO_WATCHER_REPO_ROOT`):**
+Browser UI and API run **only in containers** (decision record: `doc-internal/features/web-ui/adr-web-console.md`). From the repository root:
 
 ```bash
-# Terminal 1 — API
-./video-watcher-web
-
-# Terminal 2 — UI (Vite proxies ``/api`` to port 8765)
-cd web/ui
-npm install
-npm run dev
+docker compose up --build
 ```
 
-**Alternative** (manual venv + `PYTHONPATH`):
+Then open **http://127.0.0.1:8080** (UI). The API is on port **8765**; nginx in the UI container proxies `/api` to the API service. All transcription (file jobs, YouTube, browser mic) runs **`python -m vw`** inside the API container.
 
-```bash
-cd web/api
-PYTHONPATH=../.. ../../.venv/bin/python -m uvicorn vw_web.main:app --host 127.0.0.1 --port 8765
-```
+| Service | Port | Role |
+|---------|------|------|
+| `ui` | 8080 (default) | Static React app + `/api` proxy |
+| `api` | 8765 | FastAPI, job queue, Whisper subprocess |
 
-Then open **http://127.0.0.1:5173** — isolated sections for **file transcription** (async job), **YouTube**, **browser → API microphone**, and **job status** (poll + SSE + artifact links).
+Override ports: `VIDEO_WATCHER_UI_PORT`, `VIDEO_WATCHER_WEB_PORT`. Job workspaces and model cache use Docker volumes (`vw-jobs`, `vw-cache`).
 
-**API tests** (fake `vw` runner by default):
+![New transcription — upload a file or paste a YouTube URL, pick Whisper model, language, and caption formats](docs/screenshots/web-ui/new-transcription.png)
+
+| | |
+|---|---|
+| ![Jobs — queue and history of file and YouTube transcriptions](docs/screenshots/web-ui/jobs.png) | ![Job detail — live log, captions, summary, and downloads](docs/screenshots/web-ui/job-detail.png) |
+| ![Microphone — live phrase capture via the API (VAD)](docs/screenshots/web-ui/microphone.png) | ![Diagnostics — runtime, GPU, Docker, and subprocess health](docs/screenshots/web-ui/diagnostics.png) |
+
+**Deprecated:** `./video-watcher-web`, host `npm run dev`, and host uvicorn — they now print a message and run `docker compose up --build` instead.
+
+**API tests** (fake `vw` runner; no containers):
 
 ```bash
 .venv/bin/pip install -r web/api/requirements.txt
 cd web/api && ../../.venv/bin/python -m pytest tests/ -q
 ```
 
-Useful environment variables: `VIDEO_WATCHER_WEB_JOBS_DIR` (where job workspaces are written), `VIDEO_WATCHER_WEB_HOST` / `VIDEO_WATCHER_WEB_PORT`, `VIDEO_WATCHER_PYTHON`, `VIDEO_WATCHER_REPO_ROOT` (if auto-detection of the repo root is wrong), `VIDEO_WATCHER_WEB_FAKE_RUNNER=1` (tests).
-
-If jobs fail with `ModuleNotFoundError: No module named 'torch'`, the API picked a Python without your Whisper install. Prefer **`./video-watcher-web`** (always uses `./.venv/bin/python`). Otherwise run `./install-local`, start uvicorn with **`../../.venv/bin/python`**, or set `VIDEO_WATCHER_PYTHON` to an interpreter that can `import torch`. `GET /api/meta` returns `subprocess_python` and `subprocess_torch_import_ok` for debugging.
-
-**Docker (API only):** from repo root, `docker compose -f web/docker-compose.yml up --build` then run the UI on the host with `npm run dev` in `web/ui` (proxy still targets `127.0.0.1:8765`). Rebuild the image after dependency changes.
+Useful environment variables (Compose): `VIDEO_WATCHER_WEB_JOBS_DIR`, `VIDEO_WATCHER_CACHE`, `VIDEO_WATCHER_WEB_HOST` / `VIDEO_WATCHER_WEB_PORT`. For pytest: `VIDEO_WATCHER_WEB_FAKE_RUNNER=1`. `GET /api/meta` reports `container_runtime` and `subprocess_torch_import_ok`.
 
 ## Docker (recommended)
 

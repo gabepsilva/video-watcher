@@ -13,7 +13,7 @@ Related E2E: [Web console — jobs, mic, downloads](e2e-web-console.md)
 **Domain language**
 
 - **Job** — One asynchronous **file** or **YouTube** transcription (and optional summary) tracked by the API until exit.
-- **Web mic** — Browser capture → **phrase audio** uploaded to the API; Whisper runs **in the API process** with a **cached model** (CLI mic remains server-side PortAudio + `vw/mic.py`).
+- **Web mic** — Browser capture → phrase audio uploaded to the API; Whisper runs via **`python -m vw`** subprocess in the API container (CLI mic remains PortAudio + `vw/mic.py`).
 - **Artifact** — Any output file under the job workspace (captions, summary markdown).
 
 ## 🎯 Scope
@@ -31,7 +31,7 @@ Related E2E: [Web console — jobs, mic, downloads](e2e-web-console.md)
 ## ✅ Decision
 
 1. **Layout:** `web/api/` (FastAPI) and `web/ui/` (Vite + React + TypeScript). Vite **proxies** `/api` to the API in dev to avoid CORS.
-2. **Jobs:** `POST /api/jobs` returns `job_id` immediately; worker runs `python -m vw` with `PYTHONPATH` set to the **repository root** (same contract as `./video-watcher`). **One concurrent subprocess job** to reduce GPU/RAM contention.
+2. **Jobs:** `POST /api/jobs` returns `job_id` immediately; worker runs `python -m vw` **inside the API container** (`VIDEO_WATCHER_RUNTIME=container`). **One concurrent subprocess job** to reduce GPU/RAM contention. Host `./video-watcher-web` is deprecated; operators use **`docker compose up`** (API + UI services).
 3. **Progress:** Subprocess **stderr** lines are appended to a ring buffer and replayed over **`GET /api/jobs/{id}/events`** as **SSE** (`data: …\n\n`).
 4. **Downloads:** `GET /api/jobs/{id}/files/{name}` serves files under the job directory only (basename allow-list).
 5. **Web mic:** `POST /api/mic/transcribe` accepts audio; server writes a temp file, runs Whisper with a **per-(model, device) cached model**; returns transcript text. **No** `--summary` on this route (matches CLI: summary not supported with mic).

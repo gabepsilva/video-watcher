@@ -12,11 +12,11 @@ export type ApiMeta = {
   gpu_available?: boolean;
   /** Native ``torch.cuda.is_available()`` on the job Python (mic + native jobs). */
   gpu_cuda_native?: boolean;
-  /** Host has GPU devices for ``video-watcher-docker`` (e.g. AMD ``/dev/kfd``). */
-  host_gpu_devices?: boolean;
-  /** ``docker`` or ``podman`` daemon reachable. */
+  /** API is running inside the Compose stack (``VIDEO_WATCHER_RUNTIME=container``). */
+  container_runtime?: boolean;
+  /** Legacy — always false; console no longer shells out to host Docker. */
   docker_available?: boolean;
-  docker_script?: string;
+  docker_required?: boolean;
   repo_root?: string;
 };
 
@@ -29,10 +29,41 @@ export type JobSummary = {
   error: string | null;
 };
 
-export type JobDetail = JobSummary & {
-  artifacts: { name: string; url: string }[];
-  log_tail: string[];
+export type JobArtifact = {
+  name: string;
+  url: string;
+  editable: boolean;
 };
+
+export type SourceMedia = {
+  name: string;
+  url: string;
+};
+
+export type JobDetail = JobSummary & {
+  source_media: SourceMedia | null;
+  artifacts: JobArtifact[];
+};
+
+export async function fetchArtifactText(url: string): Promise<string> {
+  const r = await fetch(url);
+  if (!r.ok) {
+    throw new Error(`GET ${url} failed: ${r.status}`);
+  }
+  return r.text();
+}
+
+export async function saveArtifactText(jobId: string, name: string, content: string): Promise<void> {
+  const r = await fetch(`/api/jobs/${jobId}/files/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+    body: content,
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`PUT failed: ${r.status} ${t}`);
+  }
+}
 
 export async function getMeta(): Promise<ApiMeta> {
   const r = await fetch("/api/meta");
