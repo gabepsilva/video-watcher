@@ -48,8 +48,8 @@ Examples:
   ./video-watcher-docker
   ./video-watcher-docker ~/Downloads/talk.mp4
   ./video-watcher-docker -m small -l en ~/Downloads/*.mp4
-  ./video-watcher-docker --mic -m tiny -l en
-  ./video-watcher-docker --mic -m tiny -o ~/Downloads
+  ./video-watcher-docker --mic -m turbo -l en --gpu
+  ./video-watcher-docker --mic -m turbo -o ~/Downloads
   ./video-watcher-docker --check
 
 Local path (no Docker): ./install-local  then  ./video-watcher FILE
@@ -65,8 +65,7 @@ Transcription flags (passed through to video-watcher / vw):
   --verbose              Live transcript text instead of progress bar
   --summary              After transcribe, summarize .txt (llama-cli built into the image)
   --summary-model KEY    Summary model (default: gemma-4-e4b)
-  --mic                  Microphone mode (passthrough host ALSA/Pulse; Ctrl+C to stop)
-  --mic-chunk SEC        Seconds per mic chunk (default: 5)
+  --mic                  Microphone mode — transcribe on pause (host ALSA/Pulse; Ctrl+C to stop)
 
 Environment variables:
   VIDEO_WATCHER_CACHE    Host cache dir → /cache (default: ~/.video_watcher)
@@ -615,7 +614,7 @@ parse_args() {
         DATA_DIR="$2"
         shift 2
         ;;
-      -o|--output-dir|-m|--model|-l|--language|-f|--formats|--summary-model|--mic-chunk)
+      -o|--output-dir|-m|--model|-l|--language|-f|--formats|--summary-model)
         WHISPER_ARGS+=("$1" "$2")
         shift 2
         ;;
@@ -698,8 +697,8 @@ main() {
     log "Ready. Transcribe a video:"
     log "  ./video-watcher-docker ${DATA_DIR}/your-video.mp4"
     log "Live mic (rebuild once after upgrade: --rebuild):"
-    log "  ./video-watcher-docker --mic -m tiny -l en"
-    log "  ./video-watcher-docker --mic -m tiny -o ${DATA_DIR}"
+    log "  ./video-watcher-docker --mic -m turbo -l en --gpu"
+    log "  ./video-watcher-docker --mic -m turbo -o ${DATA_DIR}"
     log ""
     log "Image: $(image_for_gpu)  |  Data dir: ${DATA_DIR}  |  GPU: ${GPU_KIND}"
   fi

@@ -68,14 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mic",
         action="store_true",
-        help="transcribe from the default microphone in chunks (experimental; Ctrl+C to stop)",
-    )
-    parser.add_argument(
-        "--mic-chunk",
-        type=float,
-        default=5.0,
-        metavar="SEC",
-        help="seconds of audio per mic chunk (default: 5; use 1–30)",
+        help="transcribe from the default microphone on pause (VAD; Ctrl+C to stop)",
     )
     parser.add_argument(
         "--list-inputs",
@@ -151,7 +144,6 @@ def main(argv: list[str] | None = None) -> int:
                 model_name=args.model,
                 device=device,
                 language=args.language,
-                chunk_seconds=args.mic_chunk,
                 output_path=out_path,
             )
         except (ValueError, ImportError) as exc:
