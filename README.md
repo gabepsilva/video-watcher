@@ -120,4 +120,20 @@ From anywhere:
 
 Containers start as **your UID/GID** (`--user $(id -u):$(id -g)` on Docker, `--userns=keep-id` on Podman), so caption files on mounted folders are owned by you, not root.
 
-Whisper models are cached on the host at `~/.cache/video-watcher` (set `VIDEO_WATCHER_CACHE` to override). Rebuild images after pulling this change: `./video-watcher-docker --rebuild`.
+Whisper models are cached on the host at `~/.video_watcher/whisper` (set `VIDEO_WATCHER_CACHE` to use a different folder). The directory is created automatically on first run.
+
+## Features
+
+- **Local Whisper** — no API key or cloud service; runs entirely on your machine
+- **Multiple caption formats** — SRT, VTT, TXT, JSON, and TSV (or pick formats with `-f`)
+- **Audio and video inputs** — mp4, mkv, mp3, wav, ogg, flac, and more (anything ffmpeg decodes)
+- **Docker or native** — `video-watcher-docker` for containers, `video-watcher` + `install-local` for a local venv
+- **GPU auto-detection (Docker)** — picks CPU, NVIDIA, or AMD ROCm image and passes hardware through
+- **AMD ROCm support (local)** — `install-gpu` for RX / Radeon GPUs on Linux
+- **Runs as your user (Docker)** — output files and cache are owned by you, not root
+- **Model cache** — Whisper weights stored under `~/.video_watcher` between runs
+- **Configurable models** — `tiny` through `large`, plus language forcing (`-l en`)
+- **Batch-friendly** — pass multiple files in one command
+- **Dependency checks** — `video-watcher-docker --check` reports what is missing and how to fix it
+- **Native fallback** — if Docker fails, retries with the host `.venv` automatically
+- **Podman-compatible** — use `CONTAINER_RUNTIME=podman` when Docker is not installed

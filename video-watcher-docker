@@ -53,7 +53,7 @@ Examples:
 Local path: ./install-local  then  ./video-watcher FILE
 
 Containers run as your host user (UID:GID) so caption files are owned by you, not root.
-Cache: ~/.cache/video-watcher (override with VIDEO_WATCHER_CACHE).
+Cache: ~/.video_watcher (override with VIDEO_WATCHER_CACHE).
 EOF
 }
 
@@ -76,7 +76,7 @@ container_runtime() {
 }
 
 cache_dir() {
-  local dir="${VIDEO_WATCHER_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/video-watcher}"
+  local dir="${VIDEO_WATCHER_CACHE:-$HOME/.video_watcher}"
   mkdir -p "$dir"
   printf '%s' "$(cd "$dir" && pwd)"
 }
@@ -468,6 +468,8 @@ parse_args() {
 
 main() {
   parse_args "$@"
+
+  : "$(cache_dir)" # ensure ~/.video_watcher exists
 
   CTR="$(container_runtime)"
 

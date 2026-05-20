@@ -12,7 +12,7 @@ RUN chmod +x install-local video-watcher \
     && ./install-local \
     && chmod -R a+rX /app
 
-# Persist downloaded Whisper weights (bind-mount ~/.cache/video-watcher → /cache).
+# Persist downloaded Whisper weights (bind-mount ~/.video_watcher → /cache).
 ENV XDG_CACHE_HOME=/cache
 
 ENTRYPOINT ["./video-watcher"]

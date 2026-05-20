@@ -10,6 +10,10 @@ readonly -a MEDIA_EXTENSIONS=(
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${SCRIPT_DIR}/.venv"
+
+# Whisper models: ~/.video_watcher/whisper (override with VIDEO_WATCHER_CACHE).
+export XDG_CACHE_HOME="${VIDEO_WATCHER_CACHE:-$HOME/.video_watcher}"
+mkdir -p "${XDG_CACHE_HOME}"
 MODEL="${WHISPER_MODEL:-base}"
 LANGUAGE=""
 OUTPUT_DIR=""
@@ -49,6 +53,7 @@ Options:
 
 Environment:
   WHISPER_MODEL          Same as --model
+  VIDEO_WATCHER_CACHE    Model cache directory (default: ~/.video_watcher)
 
 Examples:
   ./video-watcher Downloads/"OpenClaw Intro.mp4"
