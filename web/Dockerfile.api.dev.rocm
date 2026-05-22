@@ -1,0 +1,34 @@
+# Dev API on ROCm: PyTorch+ROCm, HIP llama-cli for --summary, bind-mount repo at runtime.
+FROM rocm/pytorch:rocm7.2.2_ubuntu22.04_py3.10_pytorch_release_2.7.1
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ffmpeg libportaudio2 git cmake build-essential \
+  && rm -rf /var/lib/apt/lists/*
+
+# ROCm llama-cli for job --summary (--gpu passes -ngl 999). RX 6800 / Navi 21: gfx1030
+ARG GPU_TARGETS=gfx1030
+RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp /tmp/llama.cpp \
+  && HIPCXX="$(hipconfig -l)/clang++" cmake -S /tmp/llama.cpp -B /tmp/llama-build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_SHARED_LIBS=ON \
+      -DGGML_HIP=ON \
+      -DGPU_TARGETS="${GPU_TARGETS}" \
+      -DGGML_NATIVE=OFF \
+  && cmake --build /tmp/llama-build -j"$(nproc)" --target llama-cli \
+  && install -d /opt/llama \
+  && cp /tmp/llama-build/bin/llama-cli /opt/llama/ \
+  && cp /tmp/llama-build/bin/*.so* /opt/llama/ \
+  && rm -rf /tmp/llama.cpp /tmp/llama-build
+
+COPY web/scripts/docker-dev-api-entrypoint.sh /usr/local/bin/docker-dev-api-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-dev-api-entrypoint.sh
+
+ENV VIDEO_WATCHER_DEV_GPU=1
+ENV VIDEO_WATCHER_LLAMA_CLI=/opt/llama/llama-cli
+ENV PATH=/opt/llama:${PATH}
+ENV LD_LIBRARY_PATH=/opt/llama:${LD_LIBRARY_PATH:-}
+
+WORKDIR /repo
+EXPOSE 8765
+ENTRYPOINT ["/usr/local/bin/docker-dev-api-entrypoint.sh"]

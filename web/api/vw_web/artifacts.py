@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import json
 import mimetypes
-import re
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import HTTPException
 from starlette.responses import FileResponse
-
-_SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
 EDITABLE_EXTENSIONS: frozenset[str] = frozenset(
     {"txt", "md", "markdown", "srt", "vtt", "json", "tsv", "csv", "log", "yml", "yaml"}
@@ -84,8 +82,22 @@ def is_audio(name: str) -> bool:
     return extension_of(name) in AUDIO_EXTENSIONS
 
 
+def artifact_name_allowed(name: str) -> bool:
+    """Reject path traversal; allow spaces and punctuation in real media filenames."""
+    if not name or name in {".", ".."}:
+        return False
+    if "\0" in name or "/" in name or "\\" in name:
+        return False
+    return True
+
+
+def artifact_file_url(job_id: str, name: str) -> str:
+    """URL path for GET/PUT artifact (percent-encoded basename)."""
+    return f"/api/jobs/{job_id}/files/{quote(name, safe='')}"
+
+
 def artifact_file(job_work_dir: Path, name: str) -> Path:
-    if not _SAFE_NAME.fullmatch(name):
+    if not artifact_name_allowed(name):
         raise HTTPException(status_code=404, detail="invalid artifact name")
     out_dir = (job_work_dir / "out").resolve()
     candidate = (out_dir / name).resolve()

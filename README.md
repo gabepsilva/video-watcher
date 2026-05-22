@@ -48,7 +48,9 @@ flowchart LR
 | **install-gpu** | Local | Install AMD ROCm PyTorch + Whisper into `.venv` |
 | **setup-rocm** | Local | Alias for `install-gpu` (back-compat) |
 | **video-watcher** | Local | Transcribe media files or run `--mic` (after install) |
-| **docker compose up** | Docker | Start the **web console** (API + UI containers) |
+| **docker compose up** | Docker | Start the **web console** (API + UI containers, production images) |
+| **docker compose -f docker-compose.dev.yml up** | Docker dev | **Live reload** + bind-mounted `.venv`, jobs, cache (fast restarts) |
+| **video-watcher-web-dev** | Docker dev | Alias for dev Compose above |
 | **video-watcher-web** | Deprecated | Alias for `docker compose up --build` |
 
 ```
@@ -60,6 +62,8 @@ video-watcher/
   setup-rocm              # Alias for install-gpu
   video-watcher           # Launcher → python -m vw
   docker-compose.yml      # Web console: API + UI (docker compose up --build)
+  docker-compose.dev.yml  # Dev console: HMR + host .venv/cache/jobs
+  video-watcher-web-dev   # Launcher → dev Compose
   video-watcher-web       # Deprecated → docker compose up --build
   web/                    # Local FastAPI + Vite UI (see “Web console” below)
   .venv/                  # Created by install-* scripts
@@ -67,7 +71,32 @@ video-watcher/
 
 ## Web console (Docker Compose)
 
-Browser UI and API run **only in containers** (decision record: `doc-internal/features/web-ui/adr-web-console.md`). From the repository root:
+Browser UI and API run **only in containers** (decision record: `doc-internal/features/web-ui/adr-web-console.md`).
+
+**Development (recommended while hacking on `web/`):** slim images, bind mounts, live reload — no full Whisper rebuild on every `up`:
+
+```bash
+./install-local   # optional once on host; reuses ./.venv in the container (CPU dev)
+./video-watcher-web-dev
+# or: docker compose -f docker-compose.dev.yml up --build
+```
+
+**GPU / ROCm dev** (AMD; passes `/dev/kfd` and `/dev/dri`, uses `rocm/pytorch` base image):
+
+```bash
+./video-watcher-web-dev --gpu
+# or: docker compose -f docker-compose.dev.yml -f docker-compose.dev.gpu.yml up --build
+```
+
+Optional on RX 6000 (Navi 21): `export HSA_OVERRIDE_GFX_VERSION=10.3.0` before `up`. Host `./install-gpu` is optional; the GPU dev entrypoint builds a `.venv` with ROCm PyTorch from the image. The GPU dev API image also builds **HIP `llama-cli`** at `/opt/llama/llama-cli` for job **Summary** (first `--build` is slow).
+
+Open **http://127.0.0.1:5173** (Vite HMR) once the API is healthy (first run may install Whisper for several minutes — the UI waits). API on **8765** with `uvicorn --reload`. Jobs, Whisper cache, and `.venv` live on disk under `.video_watcher_web/jobs`, `.cache`, and `.venv`.
+
+Default dev Compose is **CPU only** (`install-local`). Use `--gpu` when you want Whisper jobs to see the GPU in Diagnostics (`gpu_available: true`).
+
+If a previous dev run left **root-owned** `.venv`, fix before restarting: `sudo chown -R "$(id -u):$(id -g)" .venv` or `rm -rf .venv` and run `./install-local` on the host.
+
+**Production-style** (nginx + static UI, full image build):
 
 ```bash
 docker compose up --build

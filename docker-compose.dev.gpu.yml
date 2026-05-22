@@ -1,0 +1,22 @@
+# ROCm GPU overlay for dev Compose. Use:
+#   docker compose -f docker-compose.dev.yml -f docker-compose.dev.gpu.yml up --build
+# or: ./video-watcher-web-dev --gpu
+services:
+  api:
+    build:
+      context: .
+      dockerfile: web/Dockerfile.api.dev.rocm
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    # Numeric GIDs — Docker may not resolve group names on all hosts.
+    group_add:
+      - "${VIDEO_WATCHER_VIDEO_GID:-44}"
+      - "${VIDEO_WATCHER_RENDER_GID:-992}"
+    environment:
+      VIDEO_WATCHER_DEV_GPU: "1"
+      VIDEO_WATCHER_LLAMA_CLI: /opt/llama/llama-cli
+      HSA_OVERRIDE_GFX_VERSION: ${HSA_OVERRIDE_GFX_VERSION:-10.3.0}
+    # Longer first start while Whisper is installed into bind-mounted .venv
+    healthcheck:
+      start_period: 1200s

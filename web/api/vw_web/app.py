@@ -29,6 +29,7 @@ from vw_web.artifacts import (
     EDITABLE_EXTENSIONS,
     MAX_EDIT_BYTES,
     artifact_file,
+    artifact_file_url,
     is_editable,
     job_input_file,
     serve_media_file,
@@ -121,7 +122,7 @@ def _artifacts_for_job(job_id: str, work_dir: Path) -> list[JobArtifact]:
             items.append(
                 JobArtifact(
                     name=p.name,
-                    url=f"/api/jobs/{job_id}/files/{p.name}",
+                    url=artifact_file_url(job_id, p.name),
                     editable=is_editable(p.name),
                 )
             )

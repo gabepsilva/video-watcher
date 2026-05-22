@@ -1,0 +1,55 @@
+# Fast local dev: slim images, bind mounts, live reload. From repo root:
+#   docker compose -f docker-compose.dev.yml up --build
+# Open http://127.0.0.1:5173 (Vite). API on :8765.
+#
+# Tip: run ./install-local on the host first so .venv is ready before the container starts.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: web/Dockerfile.api.dev
+    # Match host UID so bind-mounted .venv/.cache stay writable (avoid root-owned .venv).
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    ports:
+      - "${VIDEO_WATCHER_WEB_PORT:-8765}:8765"
+    environment:
+      VIDEO_WATCHER_RUNTIME: container
+      VIDEO_WATCHER_REPO_ROOT: /repo
+      PYTHONPATH: /repo
+      VIDEO_WATCHER_CACHE: /cache
+      XDG_CACHE_HOME: /cache
+      VIDEO_WATCHER_WEB_JOBS_DIR: /repo/.video_watcher_web/jobs
+      VIDEO_WATCHER_WEB_HOST: 0.0.0.0
+    volumes:
+      - .:/repo
+      - ${VIDEO_WATCHER_CACHE:-./.cache}:/cache
+      - ./.video_watcher_web/jobs:/repo/.video_watcher_web/jobs
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/repo/.venv/bin/python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health/live')\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 900s
+    # No Whisper install in the image — first start may run install-local into ./.venv on disk.
+
+  ui:
+    build:
+      context: .
+      dockerfile: web/Dockerfile.ui.dev
+    ports:
+      - "${VIDEO_WATCHER_UI_DEV_PORT:-5173}:5173"
+    environment:
+      VITE_API_PROXY_TARGET: http://api:8765
+    volumes:
+      - ./web/ui:/app
+      - vw-ui-node-modules:/app/node_modules
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  vw-ui-node-modules:
