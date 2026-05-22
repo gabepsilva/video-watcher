@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchArtifactText, saveArtifactText } from "../../api";
-import { extOf, textPreviewLabel } from "../../lib/artifactMedia";
+import { isMarkdownFile, textPreviewLabel } from "../../lib/artifactMedia";
+import { openMarkdownPreviewTab } from "../../lib/markdownPreviewTab";
+import { MarkdownArtifactView } from "./MarkdownArtifactView";
 import { Button } from "../ui/Button";
 
 const MAX_EDIT_CHARS = 5 * 1024 * 1024;
@@ -21,7 +23,7 @@ export function TextArtifactEditor({ jobId, name, url, editable, expanded }: Pro
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const ext = extOf(name);
+  const markdown = isMarkdownFile(name);
   const label = textPreviewLabel(name);
 
   const loadText = useCallback(async () => {
@@ -81,35 +83,61 @@ export function TextArtifactEditor({ jobId, name, url, editable, expanded }: Pro
       </label>
       {loading ? <p className="artifact-panel__hint u-muted">Loading…</p> : null}
       {err ? <p className="alert">{err}</p> : null}
-      {!loading && !err ? (
+      {!loading && !err && markdown ? (
+        <MarkdownArtifactView
+          id={`preview-${name}`}
+          content={content}
+          editable={editable}
+          onChange={editable ? setContent : undefined}
+        />
+      ) : null}
+      {!loading && !err && !markdown ? (
         <textarea
           id={`preview-${name}`}
-          className={`artifact-editor${ext === "md" || ext === "markdown" ? " artifact-editor--md" : ""}`}
+          className="artifact-editor"
           value={content}
           readOnly={!editable}
           onChange={(e) => editable && setContent(e.target.value)}
           spellCheck={false}
         />
       ) : null}
-      {editable && !loading && !err ? (
+      {markdown && !loading && !err ? (
         <div className="artifact-editor__actions">
-          <Button variant="primary" size="sm" disabled={saving || !dirty} onClick={() => void onSave()}>
-            {saving ? "Saving…" : "Save"}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => openMarkdownPreviewTab(content, name)}
+          >
+            Open rendered view
           </Button>
-          {dirty ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={saving}
-              onClick={() => {
-                setContent(saved);
-                setErr(null);
-              }}
-            >
-              Revert
-            </Button>
+          {editable ? (
+            <>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={saving || !dirty}
+                onClick={() => void onSave()}
+              >
+                {saving ? "Saving…" : "Save"}
+              </Button>
+              {dirty ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={saving}
+                  onClick={() => {
+                    setContent(saved);
+                    setErr(null);
+                  }}
+                >
+                  Revert
+                </Button>
+              ) : null}
+              <span className="artifact-panel__hint u-muted">
+                {dirty ? "Unsaved changes" : "Saved"}
+              </span>
+            </>
           ) : null}
-          <span className="artifact-panel__hint u-muted">{dirty ? "Unsaved changes" : "Saved"}</span>
         </div>
       ) : null}
     </>

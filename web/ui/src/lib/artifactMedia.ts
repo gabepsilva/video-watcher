@@ -37,6 +37,11 @@ export function isTextFile(name: string): boolean {
   return TEXT.has(extOf(name));
 }
 
+export function isMarkdownFile(name: string): boolean {
+  const ext = extOf(name);
+  return ext === "md" || ext === "markdown";
+}
+
 export function textPreviewLabel(name: string): string {
   const ext = extOf(name);
   if (ext === "json") return "JSON";

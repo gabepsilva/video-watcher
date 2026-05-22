@@ -1,0 +1,25 @@
+// Standalone rendered markdown tab (/preview) — no console chrome
+
+.md-preview {
+  min-height: 100vh;
+  margin: 0;
+  padding: clamp(20px, 4vw, 48px) clamp(16px, 5vw, 40px);
+  background: var(--bg);
+  color: var(--ink);
+
+  &__article {
+    max-width: 42rem;
+    margin: 0 auto;
+  }
+
+  &__hint,
+  &__err {
+    max-width: 42rem;
+    margin: 0 auto;
+    font-size: 14px;
+  }
+
+  &__err {
+    color: var(--red);
+  }
+}

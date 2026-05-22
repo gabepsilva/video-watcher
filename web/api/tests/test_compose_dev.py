@@ -12,6 +12,13 @@ def test_dev_compose_and_dockerfiles_exist() -> None:
     assert (ROOT / "web/Dockerfile.api.dev").is_file()
     assert (ROOT / "web/Dockerfile.ui.dev").is_file()
     assert (ROOT / "web/scripts/docker-dev-api-entrypoint.sh").is_file()
+    assert (ROOT / "web/scripts/docker-dev-ui-entrypoint.sh").is_file()
+
+
+def test_dev_ui_entrypoint_syncs_npm_on_lock_change() -> None:
+    text = (ROOT / "web/scripts/docker-dev-ui-entrypoint.sh").read_text(encoding="utf-8")
+    assert "npm ci" in text
+    assert "package-lock.sha256" in text
 
 
 def test_dev_api_entrypoint_uses_reload() -> None:

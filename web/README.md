@@ -25,6 +25,7 @@ docker compose up --build
 | `Dockerfile.api` / `Dockerfile.ui` | Production images (`docker-compose.yml`) |
 | `nginx.conf` | Prod UI: proxies `/api` → `http://api:8765` (`client_max_body_size 0`) |
 | `scripts/docker-dev-api-entrypoint.sh` | Dev API: ensure `.venv`, `uvicorn --reload` |
+| `scripts/docker-dev-ui-entrypoint.sh` | Dev UI: `npm ci` when `package-lock.json` changes (named `node_modules` volume) |
 
 Host `./video-watcher-web` is **deprecated** for normal use.
 

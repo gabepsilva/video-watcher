@@ -56,6 +56,9 @@ Rules:
 - Produce 1–4 diagrams; skip prose that does not map to a graph.
 - Every diagram MUST be inside a ```mermaid fenced code block (required for rendering).
 - Valid Mermaid only (no HTML, no prose inside code fences).
+- All display strings MUST use double quotes: node labels, edge labels, participant \
+names, state names, etc. (e.g. A["Transcribe audio"], B -->|"done"| C). Never use \
+bare unquoted labels.
 - Output markdown starting with ## Diagrams, then one ### section per diagram.\
 """
 
